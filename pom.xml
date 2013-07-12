@@ -29,7 +29,7 @@
         <!--Dependency versions-->
         <cassandra.driver.version>1.0.1</cassandra.driver.version>
         <snappy.version>1.0.5</snappy.version>
-        <vertx.version>2.0.0-CR2</vertx.version>
+        <vertx.version>2.0.0-CR3</vertx.version>
         <vertx.testtools.version>2.0.0-CR2</vertx.testtools.version>
         <junit.version>4.11</junit.version>
         <mockito.version>1.9.5</mockito.version>
