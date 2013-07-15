@@ -32,6 +32,7 @@ import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.EventBus;
 import org.vertx.java.core.eventbus.Message;
+import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Verticle;
@@ -56,9 +57,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     protected EventBus eb;
     protected Logger logger;
 
-    protected String address;
-    protected String ip;
-    //    protected int port;
     protected String keyspace;
 
     protected Cluster cluster;
@@ -82,14 +80,27 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         logger = container.logger();
 
         JsonObject config = container.config();
-        address = config.getString("address", DEFAULT_ADDRESS);
+        String address = config.getString("address", DEFAULT_ADDRESS);
 
-        ip = config.getString("ip", "127.0.0.1");
+        // Get array of IPs, default to localhost
+        JsonArray ips = config.getArray("ips");
+        if (ips == null || ips.size() == 0) {
+            ips = new JsonArray().addString("127.0.0.1");
+        }
+
+        // Get keyspace, default to binarystore
         keyspace = config.getString("keyspace", "binarystore");
 
-        cluster = clusterBuilderProvider.get()
-                .addContactPoint(ip)
-                .build();
+        // Create cluster builder
+        Cluster.Builder builder = clusterBuilderProvider.get();
+
+        // Add cassandra cluster contact points
+        for (int i = 0; i < ips.size(); i++) {
+            builder.addContactPoint(ips.<String>get(i));
+        }
+
+        // Build cluster and session
+        cluster = builder.build();
         session = cluster.connect();
 
         ensureSchema();
