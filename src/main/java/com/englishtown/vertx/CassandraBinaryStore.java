@@ -25,7 +25,6 @@ package com.englishtown.vertx;
 
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.AlreadyExistsException;
-import com.datastax.driver.core.querybuilder.Insert;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
@@ -55,14 +54,15 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     protected String address;
     protected String ip;
-    protected int port;
+    //    protected int port;
     protected String keyspace;
 
     protected Cluster cluster;
     protected Session session;
     protected PreparedStatement insertChunk;
-
-    public static final String DEFAULT_TABLE_NAME = "files";
+    protected PreparedStatement insertFile;
+    protected PreparedStatement getChunk;
+    protected PreparedStatement getFile;
 
     @Override
     public void start() {
@@ -144,12 +144,45 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     public void initPreparedStatements() {
 
-        StringBuffer sb = new StringBuffer()
-                .append("INSERT INTO ")
-                .append(keyspace)
-                .append(".chunks (files_id, n, data) VALUES(?, ?, ?)");
+        String query = QueryBuilder
+                .insertInto(keyspace, "chunks")
+                .value("files_id", QueryBuilder.bindMarker())
+                .value("n", QueryBuilder.bindMarker())
+                .value("data", QueryBuilder.bindMarker())
+                .getQueryString();
 
-        insertChunk = session.prepare(sb.toString());
+        this.insertChunk = session.prepare(query);
+
+        query = QueryBuilder
+                .insertInto(keyspace, "files")
+                .value("id", QueryBuilder.bindMarker())
+                .value("length", QueryBuilder.bindMarker())
+                .value("chunkSize", QueryBuilder.bindMarker())
+                .value("uploadDate", QueryBuilder.bindMarker())
+                .value("filename", QueryBuilder.bindMarker())
+                .value("contentType", QueryBuilder.bindMarker())
+                .value("metadata", QueryBuilder.bindMarker())
+                .getQueryString();
+
+        this.insertFile = session.prepare(query);
+
+        query = QueryBuilder
+                .select()
+                .all()
+                .from(keyspace, "files")
+                .where(eq("id", QueryBuilder.bindMarker()))
+                .getQueryString();
+
+        this.getFile = session.prepare(query);
+
+        query = QueryBuilder
+                .select("data")
+                .from(keyspace, "chunks")
+                .where(eq("files_id", QueryBuilder.bindMarker()))
+                .and(eq("n", QueryBuilder.bindMarker()))
+                .getQueryString();
+
+        this.getChunk = session.prepare(query);
 
     }
 
@@ -189,7 +222,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        Integer length = getRequiredInt("length", message, jsonObject, 1);
+        Long length = getRequiredLong("length", message, jsonObject, 1);
         if (length == null) {
             return;
         }
@@ -207,19 +240,12 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         String filename = jsonObject.getString("filename");
         String contentType = jsonObject.getString("contentType");
         JsonObject metadata = jsonObject.getObject("metadata");
+        String metadataStr = metadata == null ? null : metadata.encode();
+        // TODO Store metadata as a map?
 
-        Insert insert = QueryBuilder
-                .insertInto(keyspace, "files")
-                .value("id", id)
-                .value("length", length)
-                .value("chunkSize", chunkSize)
-                .value("uploadDate", uploadDate);
+        BoundStatement query = insertFile.bind(id, length, chunkSize, uploadDate, filename, contentType, metadataStr);
 
-        if (filename != null) insert.value("filename", filename);
-        if (contentType != null) insert.value("contentType", contentType);
-        if (metadata != null) insert.value("metadata", metadata.encode());  // TODO Store metadata as a map?
-
-        executeQuery(insert, message, new FutureCallback<ResultSet>() {
+        executeQuery(query, message, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
                 sendOK(message);
@@ -310,11 +336,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        Query query = QueryBuilder
-                .select()
-                .all()
-                .from(keyspace, "files")
-                .where(eq("id", id));
+        BoundStatement query = getFile.bind(id);
 
         executeQuery(query, message, new FutureCallback<ResultSet>() {
             @Override
@@ -359,12 +381,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        final Query select = QueryBuilder
-                .select("data")
-                .from(keyspace, "chunks")
-                .where(eq("files_id", id)).and(eq("n", n));
+        BoundStatement query = getChunk.bind(id, n);
 
-        executeQuery(select, message, new FutureCallback<ResultSet>() {
+        executeQuery(query, message, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
                 Row row = result.one();
@@ -467,6 +486,19 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     private <T> Integer getRequiredInt(String fieldName, Message<T> message, JsonObject jsonObject, int minValue) {
         Integer value = jsonObject.getInteger(fieldName);
+        if (value == null) {
+            sendError(message, fieldName + " must be specified");
+            return null;
+        }
+        if (value < minValue) {
+            sendError(message, fieldName + " must be greater than or equal to " + minValue);
+            return null;
+        }
+        return value;
+    }
+
+    private <T> Long getRequiredLong(String fieldName, Message<T> message, JsonObject jsonObject, long minValue) {
+        Long value = jsonObject.getLong(fieldName);
         if (value == null) {
             sendError(message, fieldName + " must be specified");
             return null;
