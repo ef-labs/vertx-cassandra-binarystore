@@ -36,10 +36,13 @@ import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Verticle;
 
+import javax.inject.Inject;
+import javax.inject.Provider;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
+import static com.datastax.driver.core.querybuilder.QueryBuilder.bindMarker;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 
 /**
@@ -48,6 +51,7 @@ import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 public class CassandraBinaryStore extends Verticle implements Handler<Message<JsonObject>> {
 
     public static final String DEFAULT_ADDRESS = "et.cassandra.binarystore";
+    private final Provider<Cluster.Builder> clusterBuilderProvider;
 
     protected EventBus eb;
     protected Logger logger;
@@ -64,6 +68,14 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     protected PreparedStatement getChunk;
     protected PreparedStatement getFile;
 
+    @Inject
+    public CassandraBinaryStore(Provider<Cluster.Builder> clusterBuilderProvider) {
+        if (clusterBuilderProvider == null) {
+            throw new IllegalArgumentException("clusterBuilderProvider is required");
+        }
+        this.clusterBuilderProvider = clusterBuilderProvider;
+    }
+
     @Override
     public void start() {
         eb = vertx.eventBus();
@@ -75,7 +87,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         ip = config.getString("ip", "127.0.0.1");
         keyspace = config.getString("keyspace", "binarystore");
 
-        cluster = Cluster.builder().addContactPoint(ip).build();
+        cluster = clusterBuilderProvider.get()
+                .addContactPoint(ip)
+                .build();
         session = cluster.connect();
 
         ensureSchema();
@@ -146,22 +160,22 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
         String query = QueryBuilder
                 .insertInto(keyspace, "chunks")
-                .value("files_id", QueryBuilder.bindMarker())
-                .value("n", QueryBuilder.bindMarker())
-                .value("data", QueryBuilder.bindMarker())
+                .value("files_id", bindMarker())
+                .value("n", bindMarker())
+                .value("data", bindMarker())
                 .getQueryString();
 
         this.insertChunk = session.prepare(query);
 
         query = QueryBuilder
                 .insertInto(keyspace, "files")
-                .value("id", QueryBuilder.bindMarker())
-                .value("length", QueryBuilder.bindMarker())
-                .value("chunkSize", QueryBuilder.bindMarker())
-                .value("uploadDate", QueryBuilder.bindMarker())
-                .value("filename", QueryBuilder.bindMarker())
-                .value("contentType", QueryBuilder.bindMarker())
-                .value("metadata", QueryBuilder.bindMarker())
+                .value("id", bindMarker())
+                .value("length", bindMarker())
+                .value("chunkSize", bindMarker())
+                .value("uploadDate", bindMarker())
+                .value("filename", bindMarker())
+                .value("contentType", bindMarker())
+                .value("metadata", bindMarker())
                 .getQueryString();
 
         this.insertFile = session.prepare(query);
@@ -170,7 +184,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .select()
                 .all()
                 .from(keyspace, "files")
-                .where(eq("id", QueryBuilder.bindMarker()))
+                .where(eq("id", bindMarker()))
                 .getQueryString();
 
         this.getFile = session.prepare(query);
@@ -178,8 +192,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         query = QueryBuilder
                 .select("data")
                 .from(keyspace, "chunks")
-                .where(eq("files_id", QueryBuilder.bindMarker()))
-                .and(eq("n", QueryBuilder.bindMarker()))
+                .where(eq("files_id", bindMarker()))
+                .and(eq("n", bindMarker()))
                 .getQueryString();
 
         this.getChunk = session.prepare(query);
