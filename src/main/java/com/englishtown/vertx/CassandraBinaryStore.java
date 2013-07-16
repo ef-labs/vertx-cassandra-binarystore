@@ -128,41 +128,50 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     public void ensureSchema() {
 
+        Metadata metadata = cluster.getMetadata();
+
         // Ensure the keyspace exists
-        try {
-            session.execute("CREATE KEYSPACE " + keyspace + " WITH replication " +
-                    "= {'class':'SimpleStrategy', 'replication_factor':3};");
-        } catch (AlreadyExistsException e) {
-            // OK if it already exists
+        KeyspaceMetadata kmd = metadata.getKeyspace(keyspace);
+        if (kmd == null) {
+            try {
+                session.execute("CREATE KEYSPACE " + keyspace + " WITH replication " +
+                        "= {'class':'SimpleStrategy', 'replication_factor':3};");
+            } catch (AlreadyExistsException e) {
+                // OK if it already exists
+            }
         }
 
-        try {
-            session.execute(
-                    "CREATE TABLE " + keyspace + ".files (" +
-                            "id uuid PRIMARY KEY," +
-                            "filename text," +
-                            "contentType text," +
-                            "chunkSize int," +
-                            "length bigint," +
-                            "uploadDate bigint," +
-                            "metadata text" +
-                            ");");
+        if (kmd == null || kmd.getTable("files") == null) {
+            try {
+                session.execute(
+                        "CREATE TABLE " + keyspace + ".files (" +
+                                "id uuid PRIMARY KEY," +
+                                "filename text," +
+                                "contentType text," +
+                                "chunkSize int," +
+                                "length bigint," +
+                                "uploadDate bigint," +
+                                "metadata text" +
+                                ");");
 
-        } catch (AlreadyExistsException e) {
-            // OK if it already exists
+            } catch (AlreadyExistsException e) {
+                // OK if it already exists
+            }
         }
 
-        try {
-            session.execute(
-                    "CREATE TABLE " + keyspace + ".chunks (" +
-                            "files_id uuid," +
-                            "n int," +
-                            "data blob," +
-                            "PRIMARY KEY (files_id, n)" +
-                            ");");
+        if (kmd == null || kmd.getTable("chunks") == null) {
+            try {
+                session.execute(
+                        "CREATE TABLE " + keyspace + ".chunks (" +
+                                "files_id uuid," +
+                                "n int," +
+                                "data blob," +
+                                "PRIMARY KEY (files_id, n)" +
+                                ");");
 
-        } catch (AlreadyExistsException e) {
-            // OK if it already exists
+            } catch (AlreadyExistsException e) {
+                // OK if it already exists
+            }
         }
 
     }
