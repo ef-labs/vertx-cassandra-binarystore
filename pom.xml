@@ -30,17 +30,17 @@
         <!--Dependency versions-->
         <cassandra.driver.version>1.0.1</cassandra.driver.version>
         <snappy.version>1.0.5</snappy.version>
-        <vertx.version>2.0.0-CR3</vertx.version>
-        <vertx.testtools.version>2.0.0-CR2</vertx.testtools.version>
+        <vertx.version>2.0.0-final</vertx.version>
+        <vertx.testtools.version>2.0.0-final</vertx.testtools.version>
         <junit.version>4.11</junit.version>
         <mockito.version>1.9.5</mockito.version>
-        <vertx.mod.hk2.version>1.0.0-CR3</vertx.mod.hk2.version>
+        <vertx.mod.hk2.version>1.0.0-final</vertx.mod.hk2.version>
 
         <!--Plugin versions-->
         <maven.compiler.plugin.version>3.0</maven.compiler.plugin.version>
         <maven.resources.plugin.version>2.6</maven.resources.plugin.version>
         <maven.clean.plugin.version>2.5</maven.clean.plugin.version>
-        <maven.vertx.plugin.version>1.0.0-CR2</maven.vertx.plugin.version>
+        <maven.vertx.plugin.version>2.0.0-final</maven.vertx.plugin.version>
         <maven.surefire.plugin.version>2.14</maven.surefire.plugin.version>
         <maven.failsafe.plugin.version>2.14</maven.failsafe.plugin.version>
         <maven.surefire.report.plugin.version>2.14</maven.surefire.report.plugin.version>
@@ -184,8 +184,11 @@
                 <version>${maven.surefire.plugin.version}</version>
                 <configuration>
                     <includes>
-                        <include>**/unit/*Test*.java</include>
+                        <include>**/*Test*.java</include>
                     </includes>
+                    <excludes>
+                        <exclude>**/integration/**</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -193,6 +196,7 @@
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <version>${maven.failsafe.plugin.version}</version>
                 <configuration>
+                    <argLine>-XX:MaxPermSize=128m</argLine>
                     <systemProperties>
                         <property>
                             <name>vertx.mods</name>

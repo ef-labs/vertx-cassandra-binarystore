@@ -121,6 +121,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     @Override
     public void stop() {
+        if (session != null) {
+            session.shutdown();
+        }
         if (cluster != null) {
             cluster.shutdown();
         }
@@ -307,6 +310,10 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         // Parse the byte[] message body
         try {
             Buffer body = message.body();
+            if (body.length() == 0) {
+                sendError(message, "message body is empty");
+                return;
+            }
 
             // First four bytes indicate the json string length
             int len = body.getInt(0);
@@ -321,7 +328,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             data = body.getBytes(from, body.length());
 
         } catch (RuntimeException e) {
-            sendError(message, "error parsing byte[] message.  see the documentation for the correct format", e);
+            sendError(message, "error parsing buffer message.  see the documentation for the correct format", e);
             return;
         }
 

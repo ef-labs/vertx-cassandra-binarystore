@@ -25,6 +25,7 @@ package com.englishtown.integration.java;
 
 import com.englishtown.vertx.CassandraBinaryStore;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
@@ -42,6 +43,7 @@ import static org.vertx.testtools.VertxAssert.testComplete;
 /**
  * Integration tests for the saveChunk operation
  */
+@RunWith(CPJavaClassRunner.class)
 public class SaveChunkIntegrationTest extends TestVerticle {
 
     private EventBus eventBus;
@@ -55,7 +57,7 @@ public class SaveChunkIntegrationTest extends TestVerticle {
         eventBus.send(address, message, new Handler<Message<JsonObject>>() {
             @Override
             public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "error parsing byte[] message.  see the documentation for the correct format");
+                IntegrationTestHelper.verifyErrorReply(message, "message body is empty");
             }
         });
 
@@ -73,7 +75,7 @@ public class SaveChunkIntegrationTest extends TestVerticle {
         eventBus.send(address, buffer, new Handler<Message<JsonObject>>() {
             @Override
             public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "error parsing byte[] message.  see the documentation for the correct format");
+                IntegrationTestHelper.verifyErrorReply(message, "error parsing buffer message.  see the documentation for the correct format");
             }
         });
 

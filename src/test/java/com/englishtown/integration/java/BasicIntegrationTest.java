@@ -25,6 +25,7 @@ package com.englishtown.integration.java;
 
 import com.englishtown.vertx.CassandraBinaryStore;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
@@ -42,6 +43,7 @@ import static org.vertx.testtools.VertxAssert.*;
 /**
  * Integration test showing a write and then reading it back
  */
+@RunWith(CPJavaClassRunner.class)
 public class BasicIntegrationTest extends TestVerticle {
 
     private EventBus eventBus;

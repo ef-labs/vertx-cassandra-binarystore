@@ -41,6 +41,8 @@ public class CassandraBinaryStoreTest {
     @Mock
     Cluster cluster;
     @Mock
+    Metadata metadata;
+    @Mock
     Cluster.Builder builder;
     @Mock
     Provider<Cluster.Builder> provider;
@@ -70,6 +72,7 @@ public class CassandraBinaryStoreTest {
         when(builder.build()).thenReturn(cluster);
 
         when(cluster.connect()).thenReturn(session);
+        when(cluster.getMetadata()).thenReturn(metadata);
 
         when(container.config()).thenReturn(config);
         when(container.logger()).thenReturn(logger);

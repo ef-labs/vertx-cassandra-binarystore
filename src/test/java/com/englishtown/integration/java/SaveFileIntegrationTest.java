@@ -25,6 +25,7 @@ package com.englishtown.integration.java;
 
 import com.englishtown.vertx.CassandraBinaryStore;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.EventBus;
@@ -40,6 +41,7 @@ import static org.vertx.testtools.VertxAssert.testComplete;
 /**
  * Integration tests for the saveFile operation
  */
+@RunWith(CPJavaClassRunner.class)
 public class SaveFileIntegrationTest extends TestVerticle {
 
     private EventBus eventBus;
