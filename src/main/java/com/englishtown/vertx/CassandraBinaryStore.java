@@ -25,20 +25,25 @@ package com.englishtown.vertx;
 
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.AlreadyExistsException;
-import com.datastax.driver.core.querybuilder.Insert;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.EventBus;
 import org.vertx.java.core.eventbus.Message;
+import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Verticle;
 
+import javax.inject.Inject;
+import javax.inject.Provider;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
+import static com.datastax.driver.core.querybuilder.QueryBuilder.bindMarker;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 
 /**
@@ -47,20 +52,27 @@ import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 public class CassandraBinaryStore extends Verticle implements Handler<Message<JsonObject>> {
 
     public static final String DEFAULT_ADDRESS = "et.cassandra.binarystore";
+    private final Provider<Cluster.Builder> clusterBuilderProvider;
 
     protected EventBus eb;
     protected Logger logger;
 
-    protected String address;
-    protected String ip;
-    protected int port;
     protected String keyspace;
 
     protected Cluster cluster;
     protected Session session;
     protected PreparedStatement insertChunk;
+    protected PreparedStatement insertFile;
+    protected PreparedStatement getChunk;
+    protected PreparedStatement getFile;
 
-    public static final String DEFAULT_TABLE_NAME = "files";
+    @Inject
+    public CassandraBinaryStore(Provider<Cluster.Builder> clusterBuilderProvider) {
+        if (clusterBuilderProvider == null) {
+            throw new IllegalArgumentException("clusterBuilderProvider is required");
+        }
+        this.clusterBuilderProvider = clusterBuilderProvider;
+    }
 
     @Override
     public void start() {
@@ -68,12 +80,27 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         logger = container.logger();
 
         JsonObject config = container.config();
-        address = config.getString("address", DEFAULT_ADDRESS);
+        String address = config.getString("address", DEFAULT_ADDRESS);
 
-        ip = config.getString("ip", "127.0.0.1");
+        // Get array of IPs, default to localhost
+        JsonArray ips = config.getArray("ips");
+        if (ips == null || ips.size() == 0) {
+            ips = new JsonArray().addString("127.0.0.1");
+        }
+
+        // Get keyspace, default to binarystore
         keyspace = config.getString("keyspace", "binarystore");
 
-        cluster = Cluster.builder().addContactPoint(ip).build();
+        // Create cluster builder
+        Cluster.Builder builder = clusterBuilderProvider.get();
+
+        // Add cassandra cluster contact points
+        for (int i = 0; i < ips.size(); i++) {
+            builder.addContactPoint(ips.<String>get(i));
+        }
+
+        // Build cluster and session
+        cluster = builder.build();
         session = cluster.connect();
 
         ensureSchema();
@@ -94,6 +121,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     @Override
     public void stop() {
+        if (session != null) {
+            session.shutdown();
+        }
         if (cluster != null) {
             cluster.shutdown();
         }
@@ -101,53 +131,95 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     public void ensureSchema() {
 
+        Metadata metadata = cluster.getMetadata();
+
         // Ensure the keyspace exists
-        try {
-            session.execute("CREATE KEYSPACE " + keyspace + " WITH replication " +
-                    "= {'class':'SimpleStrategy', 'replication_factor':3};");
-        } catch (AlreadyExistsException e) {
-            // OK if it already exists
+        KeyspaceMetadata kmd = metadata.getKeyspace(keyspace);
+        if (kmd == null) {
+            try {
+                session.execute("CREATE KEYSPACE " + keyspace + " WITH replication " +
+                        "= {'class':'SimpleStrategy', 'replication_factor':3};");
+            } catch (AlreadyExistsException e) {
+                // OK if it already exists
+            }
         }
 
-        try {
-            session.execute(
-                    "CREATE TABLE " + keyspace + ".files (" +
-                            "id uuid PRIMARY KEY," +
-                            "filename text," +
-                            "contentType text," +
-                            "chunkSize int," +
-                            "length bigint," +
-                            "uploadDate bigint," +
-                            "metadata text" +
-                            ");");
+        if (kmd == null || kmd.getTable("files") == null) {
+            try {
+                session.execute(
+                        "CREATE TABLE " + keyspace + ".files (" +
+                                "id uuid PRIMARY KEY," +
+                                "filename text," +
+                                "contentType text," +
+                                "chunkSize int," +
+                                "length bigint," +
+                                "uploadDate bigint," +
+                                "metadata text" +
+                                ");");
 
-        } catch (AlreadyExistsException e) {
-            // OK if it already exists
+            } catch (AlreadyExistsException e) {
+                // OK if it already exists
+            }
         }
 
-        try {
-            session.execute(
-                    "CREATE TABLE " + keyspace + ".chunks (" +
-                            "files_id uuid," +
-                            "n int," +
-                            "data blob," +
-                            "PRIMARY KEY (files_id, n)" +
-                            ");");
+        if (kmd == null || kmd.getTable("chunks") == null) {
+            try {
+                session.execute(
+                        "CREATE TABLE " + keyspace + ".chunks (" +
+                                "files_id uuid," +
+                                "n int," +
+                                "data blob," +
+                                "PRIMARY KEY (files_id, n)" +
+                                ");");
 
-        } catch (AlreadyExistsException e) {
-            // OK if it already exists
+            } catch (AlreadyExistsException e) {
+                // OK if it already exists
+            }
         }
 
     }
 
     public void initPreparedStatements() {
 
-        StringBuffer sb = new StringBuffer()
-                .append("INSERT INTO ")
-                .append(keyspace)
-                .append(".chunks (files_id, n, data) VALUES(?, ?, ?)");
+        String query = QueryBuilder
+                .insertInto(keyspace, "chunks")
+                .value("files_id", bindMarker())
+                .value("n", bindMarker())
+                .value("data", bindMarker())
+                .getQueryString();
 
-        insertChunk = session.prepare(sb.toString());
+        this.insertChunk = session.prepare(query);
+
+        query = QueryBuilder
+                .insertInto(keyspace, "files")
+                .value("id", bindMarker())
+                .value("length", bindMarker())
+                .value("chunkSize", bindMarker())
+                .value("uploadDate", bindMarker())
+                .value("filename", bindMarker())
+                .value("contentType", bindMarker())
+                .value("metadata", bindMarker())
+                .getQueryString();
+
+        this.insertFile = session.prepare(query);
+
+        query = QueryBuilder
+                .select()
+                .all()
+                .from(keyspace, "files")
+                .where(eq("id", bindMarker()))
+                .getQueryString();
+
+        this.getFile = session.prepare(query);
+
+        query = QueryBuilder
+                .select("data")
+                .from(keyspace, "chunks")
+                .where(eq("files_id", bindMarker()))
+                .and(eq("n", bindMarker()))
+                .getQueryString();
+
+        this.getChunk = session.prepare(query);
 
     }
 
@@ -180,14 +252,14 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         }
     }
 
-    public void saveFile(Message<JsonObject> message, JsonObject jsonObject) {
+    public void saveFile(final Message<JsonObject> message, JsonObject jsonObject) {
 
         UUID id = getUUID("id", message, jsonObject);
         if (id == null) {
             return;
         }
 
-        Integer length = getRequiredInt("length", message, jsonObject, 1);
+        Long length = getRequiredLong("length", message, jsonObject, 1);
         if (length == null) {
             return;
         }
@@ -205,25 +277,23 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         String filename = jsonObject.getString("filename");
         String contentType = jsonObject.getString("contentType");
         JsonObject metadata = jsonObject.getObject("metadata");
+        String metadataStr = metadata == null ? null : metadata.encode();
+        // TODO Store metadata as a map?
 
-        try {
-            Insert insert = QueryBuilder
-                    .insertInto(keyspace, "files")
-                    .value("id", id)
-                    .value("length", length)
-                    .value("chunkSize", chunkSize)
-                    .value("uploadDate", uploadDate);
+        BoundStatement query = insertFile.bind(id, length, chunkSize, uploadDate, filename, contentType, metadataStr);
 
-            if (filename != null) insert.value("filename", filename);
-            if (contentType != null) insert.value("contentType", contentType);
-            if (metadata != null) insert.value("metadata", metadata.encode());  // TODO Store metadata as a map?
+        executeQuery(query, message, new FutureCallback<ResultSet>() {
+            @Override
+            public void onSuccess(ResultSet result) {
+                sendOK(message);
+            }
 
-            session.execute(insert);
-            sendOK(message);
+            @Override
+            public void onFailure(Throwable t) {
+                sendError(message, "Error saving file", t);
+            }
+        });
 
-        } catch (Exception e) {
-            sendError(message, "Error saving file", e);
-        }
     }
 
     /**
@@ -240,6 +310,10 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         // Parse the byte[] message body
         try {
             Buffer body = message.body();
+            if (body.length() == 0) {
+                sendError(message, "message body is empty");
+                return;
+            }
 
             // First four bytes indicate the json string length
             int len = body.getInt(0);
@@ -254,7 +328,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             data = body.getBytes(from, body.length());
 
         } catch (RuntimeException e) {
-            sendError(message, "error parsing byte[] message.  see the documentation for the correct format", e);
+            sendError(message, "error parsing buffer message.  see the documentation for the correct format", e);
             return;
         }
 
@@ -263,7 +337,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     }
 
-    public void saveChunk(Message<Buffer> message, JsonObject jsonObject, byte[] data) {
+    public void saveChunk(final Message<Buffer> message, JsonObject jsonObject, byte[] data) {
 
         if (data == null || data.length == 0) {
             sendError(message, "chunk data is missing");
@@ -280,61 +354,66 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        try {
-            BoundStatement insert = insertChunk.bind(id, n, ByteBuffer.wrap(data));
-            session.execute(insert);
-            sendOK(message);
+        BoundStatement insert = insertChunk.bind(id, n, ByteBuffer.wrap(data));
 
-        } catch (RuntimeException e) {
-            sendError(message, "Error saving chunk", e);
-        }
+        executeQuery(insert, message, new FutureCallback<ResultSet>() {
+            @Override
+            public void onSuccess(ResultSet result) {
+                sendOK(message);
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                sendError(message, "Error saving chunk", t);
+            }
+        });
 
     }
 
-    public void getFile(Message<JsonObject> message, JsonObject jsonObject) {
+    public void getFile(final Message<JsonObject> message, JsonObject jsonObject) {
 
-        UUID id = getUUID("id", message, jsonObject);
+        final UUID id = getUUID("id", message, jsonObject);
         if (id == null) {
             return;
         }
 
-        try {
-            Query query = QueryBuilder
-                    .select()
-                    .all()
-                    .from(keyspace, "files")
-                    .where(eq("id", id));
+        BoundStatement query = getFile.bind(id);
 
-            Row row = session.execute(query).one();
+        executeQuery(query, message, new FutureCallback<ResultSet>() {
+            @Override
+            public void onSuccess(ResultSet result) {
+                Row row = result.one();
 
-            if (row == null) {
-                sendError(message, "File " + id.toString() + " does not exist");
-                return;
+                if (row == null) {
+                    sendError(message, "File " + id.toString() + " does not exist");
+                    return;
+                }
+
+                JsonObject fileInfo = new JsonObject()
+                        .putString("filename", row.getString("filename"))
+                        .putString("contentType", row.getString("contentType"))
+                        .putNumber("length", row.getLong("length"))
+                        .putNumber("chunkSize", row.getInt("chunkSize"))
+                        .putNumber("uploadDate", row.getLong("uploadDate"));
+
+                String metadata = row.getString("metadata");
+                if (metadata != null) {
+                    fileInfo.putObject("metadata", new JsonObject(metadata));
+                }
+
+                // Send file info
+                sendOK(message, fileInfo);
             }
 
-            JsonObject fileInfo = new JsonObject()
-                    .putString("filename", row.getString("filename"))
-                    .putString("contentType", row.getString("contentType"))
-                    .putNumber("length", row.getLong("length"))
-                    .putNumber("chunkSize", row.getInt("chunkSize"))
-                    .putNumber("uploadDate", row.getLong("uploadDate"));
-
-            String metadata = row.getString("metadata");
-            if (metadata != null) {
-                fileInfo.putObject("metadata", new JsonObject(metadata));
+            @Override
+            public void onFailure(Throwable t) {
+                sendError(message, "Error reading file", t);
             }
-
-            // Send file info
-            sendOK(message, fileInfo);
-
-
-        } catch (RuntimeException e) {
-            sendError(message, "Error reading file", e);
-        }
+        });
 
     }
 
-    public void getChunk(Message<JsonObject> message, final JsonObject jsonObject) {
+    public void getChunk(final Message<JsonObject> message, final JsonObject jsonObject) {
 
         UUID id = getUUID("files_id", message, jsonObject);
 
@@ -343,38 +422,57 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        Query select = QueryBuilder
-                .select("data")
-                .from(keyspace, "chunks")
-                .where(eq("files_id", id)).and(eq("n", n));
+        BoundStatement query = getChunk.bind(id, n);
 
-        Row row = session.execute(select).one();
+        executeQuery(query, message, new FutureCallback<ResultSet>() {
+            @Override
+            public void onSuccess(ResultSet result) {
+                Row row = result.one();
 
-        if (row == null) {
-            message.reply(new byte[0]);
-            return;
-        }
-
-        ByteBuffer bb = row.getBytes("data");
-        byte[] data = new byte[bb.remaining()];
-        bb.get(data);
-
-        boolean reply = jsonObject.getBoolean("reply", false);
-        Handler<Message<JsonObject>> replyHandler = null;
-
-        if (reply) {
-            replyHandler = new Handler<Message<JsonObject>>() {
-                @Override
-                public void handle(Message<JsonObject> reply) {
-                    int n = jsonObject.getInteger("n") + 1;
-                    jsonObject.putNumber("n", n);
-                    getChunk(reply, jsonObject);
+                if (row == null) {
+                    message.reply(new byte[0]);
+                    return;
                 }
-            };
-        }
 
-        // TODO: Change to reply with a Buffer instead of a byte[]?
-        message.reply(data, replyHandler);
+                ByteBuffer bb = row.getBytes("data");
+                byte[] data = new byte[bb.remaining()];
+                bb.get(data);
+
+                boolean reply = jsonObject.getBoolean("reply", false);
+                Handler<Message<JsonObject>> replyHandler = null;
+
+                if (reply) {
+                    replyHandler = new Handler<Message<JsonObject>>() {
+                        @Override
+                        public void handle(Message<JsonObject> reply) {
+                            int n = jsonObject.getInteger("n") + 1;
+                            jsonObject.putNumber("n", n);
+                            getChunk(reply, jsonObject);
+                        }
+                    };
+                }
+
+                // TODO: Change to reply with a Buffer instead of a byte[]?
+                message.reply(data, replyHandler);
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                sendError(message, "Error reading chunk", t);
+            }
+        });
+
+    }
+
+    public <T> void executeQuery(Query query, Message<T> message, final FutureCallback<ResultSet> callback) {
+
+        try {
+            final ResultSetFuture future = session.executeAsync(query);
+            Futures.addCallback(future, callback);
+
+        } catch (Throwable e) {
+            sendError(message, "Error executing async cassandra query", e);
+        }
 
     }
 
@@ -429,6 +527,19 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     private <T> Integer getRequiredInt(String fieldName, Message<T> message, JsonObject jsonObject, int minValue) {
         Integer value = jsonObject.getInteger(fieldName);
+        if (value == null) {
+            sendError(message, fieldName + " must be specified");
+            return null;
+        }
+        if (value < minValue) {
+            sendError(message, fieldName + " must be greater than or equal to " + minValue);
+            return null;
+        }
+        return value;
+    }
+
+    private <T> Long getRequiredLong(String fieldName, Message<T> message, JsonObject jsonObject, long minValue) {
+        Long value = jsonObject.getLong(fieldName);
         if (value == null) {
             sendError(message, fieldName + " must be specified");
             return null;

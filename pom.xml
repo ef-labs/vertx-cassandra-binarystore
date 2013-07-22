@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>vertx-mod-cassandra-binarystore</artifactId>
     <packaging>jar</packaging>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.0-final</version>
     <name>vertx-mod-cassandra-binarystore</name>
     <url>https://github.com/englishtown/vertx-mod-cassandra-binarystore</url>
 
@@ -17,11 +16,12 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <!-- Set pullInDeps to true if you want any modules specified in the 'includes' and 'deploys' fields
         in your mod.json to be automatically pulled in during packaging and added inside your module. Doing this means your
         module won't download and install those dependencies at run-time when they're first requested. -->
-        <vertx.pullInDeps>false</vertx.pullInDeps>
+        <vertx.pullInDeps>true</vertx.pullInDeps>
 
         <!--Vertx module name-->
         <module.name>${project.groupId}~${project.artifactId}~${project.version}</module.name>
@@ -29,16 +29,17 @@
         <!--Dependency versions-->
         <cassandra.driver.version>1.0.1</cassandra.driver.version>
         <snappy.version>1.0.5</snappy.version>
-        <vertx.version>2.0.0-CR2</vertx.version>
-        <vertx.testtools.version>2.0.0-CR2</vertx.testtools.version>
+        <vertx.version>2.0.0-final</vertx.version>
+        <vertx.testtools.version>2.0.0-final</vertx.testtools.version>
         <junit.version>4.11</junit.version>
         <mockito.version>1.9.5</mockito.version>
+        <vertx.mod.hk2.version>1.0.0-final</vertx.mod.hk2.version>
 
         <!--Plugin versions-->
         <maven.compiler.plugin.version>3.0</maven.compiler.plugin.version>
         <maven.resources.plugin.version>2.6</maven.resources.plugin.version>
         <maven.clean.plugin.version>2.5</maven.clean.plugin.version>
-        <maven.vertx.plugin.version>1.0.0-CR2</maven.vertx.plugin.version>
+        <maven.vertx.plugin.version>2.0.0-final</maven.vertx.plugin.version>
         <maven.surefire.plugin.version>2.14</maven.surefire.plugin.version>
         <maven.failsafe.plugin.version>2.14</maven.failsafe.plugin.version>
         <maven.surefire.report.plugin.version>2.14</maven.surefire.report.plugin.version>
@@ -91,7 +92,12 @@
             <artifactId>snappy-java</artifactId>
             <version>${snappy.version}</version>
         </dependency>
-
+        <dependency>
+            <groupId>com.englishtown</groupId>
+            <artifactId>vertx-mod-hk2</artifactId>
+            <version>${vertx.mod.hk2.version}</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -177,8 +183,11 @@
                 <version>${maven.surefire.plugin.version}</version>
                 <configuration>
                     <includes>
-                        <include>**/unit/*Test*.java</include>
+                        <include>**/*Test*.java</include>
                     </includes>
+                    <excludes>
+                        <exclude>**/integration/**</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -186,6 +195,7 @@
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <version>${maven.failsafe.plugin.version}</version>
                 <configuration>
+                    <argLine>-XX:MaxPermSize=128m</argLine>
                     <systemProperties>
                         <property>
                             <name>vertx.mods</name>
@@ -275,7 +285,7 @@
     <scm>
         <connection>scm:git:ssh://git@github.com/englishtown/${project.artifactId}.git</connection>
         <developerConnection>scm:git:ssh://git@github.com/englishtown/${project.artifactId}.git</developerConnection>
-        <tag>HEAD</tag>
+        <tag>1.0.0-final</tag>
         <url>https://github.com/englishtown/${project.artifactId}</url>
     </scm>
 
