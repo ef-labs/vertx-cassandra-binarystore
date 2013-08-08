@@ -26,8 +26,13 @@ package com.englishtown.vertx;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.AlreadyExistsException;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
+import com.englishtown.jmx.BeanManager;
+import com.englishtown.vertx.mxbeans.impl.CassandraGeneralInfoMXBeanImpl;
+import com.englishtown.vertx.mxbeans.impl.ClientStatisticsMXBeanImpl;
+import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
+import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.EventBus;
@@ -39,9 +44,15 @@ import org.vertx.java.platform.Verticle;
 
 import javax.inject.Inject;
 import javax.inject.Provider;
+import javax.management.InstanceAlreadyExistsException;
+import javax.management.MBeanRegistrationException;
+import javax.management.MalformedObjectNameException;
+import javax.management.NotCompliantMBeanException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
+import java.util.Hashtable;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static com.datastax.driver.core.querybuilder.QueryBuilder.bindMarker;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
@@ -65,6 +76,10 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     protected PreparedStatement insertFile;
     protected PreparedStatement getChunk;
     protected PreparedStatement getFile;
+    private String address;
+    private JsonObject config;
+    private ClientStatisticsMXBeanImpl filesStatsBean;
+    private ClientStatisticsMXBeanImpl chunksStatsBean;
 
     @Inject
     public CassandraBinaryStore(Provider<Cluster.Builder> clusterBuilderProvider) {
@@ -75,12 +90,12 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     }
 
     @Override
-    public void start() {
+    public void start(final Future<Void> startedResult) {
         eb = vertx.eventBus();
         logger = container.logger();
 
-        JsonObject config = container.config();
-        String address = config.getString("address", DEFAULT_ADDRESS);
+        config = container.config();
+        address = config.getString("address", DEFAULT_ADDRESS);
 
         // Get array of IPs, default to localhost
         JsonArray ips = config.getArray("ips");
@@ -116,6 +131,42 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 saveChunk(message);
             }
         });
+
+        if (BeanManager.INSTANCE.isEnabled()) {
+            try {
+                registerBeans();
+            } catch (Exception e) {
+                startedResult.setFailure(e);
+                startedResult.failed();
+                return;
+            }
+        }
+
+        startedResult.setResult(null);
+    }
+
+    private void registerBeans() throws MalformedObjectNameException, NotCompliantMBeanException, InstanceAlreadyExistsException, MBeanRegistrationException {
+        // Register General Info Bean
+        final CassandraGeneralInfoMXBeanImpl generalInfoMXBean = new CassandraGeneralInfoMXBeanImpl(address, container.config(),
+                vertx.isWorker(), config.getArray("ips"));
+        final Hashtable<String, String> generalInfoKeys = new Hashtable<>();
+        generalInfoKeys.put("type", "GeneralInfo");
+        generalInfoKeys.put("verticle", this.getClass().getSimpleName());
+        BeanManager.INSTANCE.registerBean(generalInfoMXBean, generalInfoKeys);
+
+        //Register the statistic bean for files
+        filesStatsBean = new ClientStatisticsMXBeanImpl();
+        final Hashtable<String, String> fileStatsBeanKeys = new Hashtable<>();
+        fileStatsBeanKeys.put("subtype", "CassandraStatistics");
+        fileStatsBeanKeys.put("type", "files");
+        BeanManager.INSTANCE.registerBean(filesStatsBean, fileStatsBeanKeys);
+
+        //Register the statistic bean for chunks
+        chunksStatsBean= new ClientStatisticsMXBeanImpl();
+        final Hashtable<String, String> chunksStatsBeanKeys = new Hashtable<>();
+        chunksStatsBeanKeys.put("subtype", "CassandraStatistics");
+        chunksStatsBeanKeys.put("type", "chunks");
+        BeanManager.INSTANCE.registerBean(chunksStatsBean, chunksStatsBeanKeys);
 
     }
 
@@ -253,6 +304,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     }
 
     public void saveFile(final Message<JsonObject> message, JsonObject jsonObject) {
+        final Stopwatch stopwatch = new Stopwatch();
+        stopwatch.start();
 
         UUID id = getUUID("id", message, jsonObject);
         if (id == null) {
@@ -285,11 +338,13 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         executeQuery(query, message, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
+                addToWriteStats(filesStatsBean, stopwatch);
                 sendOK(message);
             }
 
             @Override
             public void onFailure(Throwable t) {
+                incrementWriteErrorCount(filesStatsBean);
                 sendError(message, "Error saving file", t);
             }
         });
@@ -303,7 +358,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
      *                the json fields, the remaining bytes are the file chunk to write to Cassandra
      */
     public void saveChunk(Message<Buffer> message) {
-
         JsonObject jsonObject;
         byte[] data;
 
@@ -311,6 +365,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         try {
             Buffer body = message.body();
             if (body.length() == 0) {
+                incrementWriteErrorCount(chunksStatsBean);
                 sendError(message, "message body is empty");
                 return;
             }
@@ -328,6 +383,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             data = body.getBytes(from, body.length());
 
         } catch (RuntimeException e) {
+            incrementWriteErrorCount(chunksStatsBean);
             sendError(message, "error parsing buffer message.  see the documentation for the correct format", e);
             return;
         }
@@ -338,8 +394,11 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     }
 
     public void saveChunk(final Message<Buffer> message, JsonObject jsonObject, byte[] data) {
+        final Stopwatch stopwatch = new Stopwatch();
+        stopwatch.start();
 
         if (data == null || data.length == 0) {
+            incrementWriteErrorCount(chunksStatsBean);
             sendError(message, "chunk data is missing");
             return;
         }
@@ -359,11 +418,13 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         executeQuery(insert, message, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
+                addToWriteStats(chunksStatsBean, stopwatch);
                 sendOK(message);
             }
 
             @Override
             public void onFailure(Throwable t) {
+                incrementWriteErrorCount(chunksStatsBean);
                 sendError(message, "Error saving chunk", t);
             }
         });
@@ -371,6 +432,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     }
 
     public void getFile(final Message<JsonObject> message, JsonObject jsonObject) {
+        final Stopwatch stopwatch = new Stopwatch();
+        stopwatch.start();
 
         final UUID id = getUUID("id", message, jsonObject);
         if (id == null) {
@@ -383,8 +446,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             @Override
             public void onSuccess(ResultSet result) {
                 Row row = result.one();
-
                 if (row == null) {
+                    incrementReadErrorCount(filesStatsBean);
                     sendError(message, "File " + id.toString() + " does not exist");
                     return;
                 }
@@ -401,12 +464,15 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                     fileInfo.putObject("metadata", new JsonObject(metadata));
                 }
 
+                addToReadStats(filesStatsBean, stopwatch);
+
                 // Send file info
                 sendOK(message, fileInfo);
             }
 
             @Override
             public void onFailure(Throwable t) {
+                incrementReadErrorCount(filesStatsBean);
                 sendError(message, "Error reading file", t);
             }
         });
@@ -414,6 +480,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     }
 
     public void getChunk(final Message<JsonObject> message, final JsonObject jsonObject) {
+        final Stopwatch stopwatch = new Stopwatch();
+        stopwatch.start();
 
         UUID id = getUUID("files_id", message, jsonObject);
 
@@ -428,8 +496,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             @Override
             public void onSuccess(ResultSet result) {
                 Row row = result.one();
-
                 if (row == null) {
+                    incrementReadErrorCount(chunksStatsBean);
                     message.reply(new byte[0]);
                     return;
                 }
@@ -437,6 +505,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 ByteBuffer bb = row.getBytes("data");
                 byte[] data = new byte[bb.remaining()];
                 bb.get(data);
+
+                addToReadStats(chunksStatsBean, stopwatch);
 
                 boolean reply = jsonObject.getBoolean("reply", false);
                 Handler<Message<JsonObject>> replyHandler = null;
@@ -458,6 +528,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
             @Override
             public void onFailure(Throwable t) {
+                incrementReadErrorCount(chunksStatsBean);
                 sendError(message, "Error reading chunk", t);
             }
         });
@@ -551,4 +622,37 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         return value;
     }
 
+    private void incrementReadErrorCount(final ClientStatisticsMXBeanImpl bean) {
+        if (BeanManager.INSTANCE.isEnabled()) {
+            bean.incremementReadErrorCount();
+        }
+    }
+
+    private void incrementWriteErrorCount(final ClientStatisticsMXBeanImpl bean) {
+        if (BeanManager.INSTANCE.isEnabled()) {
+            bean.incremementWriteErrorCount();
+        }
+    }
+
+    private void addToReadStats(final ClientStatisticsMXBeanImpl bean, final Stopwatch stopwatch) {
+        if (stopwatch.isRunning()) {
+            stopwatch.stop();
+        }
+
+        if (BeanManager.INSTANCE.isEnabled()) {
+            bean.incrementReadCount();
+            bean.addToReadStats(stopwatch.elapsed(TimeUnit.MILLISECONDS));
+        }
+    }
+
+    private void addToWriteStats(final ClientStatisticsMXBeanImpl bean, final Stopwatch stopwatch) {
+        if (stopwatch.isRunning()) {
+            stopwatch.stop();
+        }
+
+        if (BeanManager.INSTANCE.isEnabled()) {
+            bean.incrementWriteCount();
+            bean.addToWriteStats(stopwatch.elapsed(TimeUnit.MILLISECONDS));
+        }
+    }
 }

@@ -7,6 +7,7 @@ import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
+import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.Vertx;
 import org.vertx.java.core.eventbus.EventBus;
@@ -60,6 +61,9 @@ public class CassandraBinaryStoreTest {
     BoundStatement boundStatement;
     @Mock
     ResultSetFuture resultSetFuture;
+    @Mock
+    Future<Void> startedResult;
+
 
     @Before
     public void setUp() throws Exception {
@@ -86,7 +90,7 @@ public class CassandraBinaryStoreTest {
         binaryStore.setVertx(vertx);
         binaryStore.setContainer(container);
 
-        binaryStore.start();
+        binaryStore.start(startedResult);
     }
 
     @Test
