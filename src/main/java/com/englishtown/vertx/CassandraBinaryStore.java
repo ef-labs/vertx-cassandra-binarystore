@@ -624,13 +624,13 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     private void incrementReadErrorCount(final ClientStatisticsMXBeanImpl bean) {
         if (BeanManager.INSTANCE.isEnabled()) {
-            bean.incremementReadErrorCount();
+            bean.incrementReadErrorCount();
         }
     }
 
     private void incrementWriteErrorCount(final ClientStatisticsMXBeanImpl bean) {
         if (BeanManager.INSTANCE.isEnabled()) {
-            bean.incremementWriteErrorCount();
+            bean.incrementWriteErrorCount();
         }
     }
 

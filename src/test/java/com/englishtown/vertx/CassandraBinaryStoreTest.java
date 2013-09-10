@@ -94,6 +94,7 @@ public class CassandraBinaryStoreTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testStart() throws Exception {
         // Start is called during setUp(), just run verifications
         verify(provider).get();

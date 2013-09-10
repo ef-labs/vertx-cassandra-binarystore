@@ -92,7 +92,7 @@ public class ClientStatisticsMXBeanImpl implements DefaultPersistorStatisticsMXB
         recordsWritten.getAndIncrement();
     }
 
-    public void incremementWriteErrorCount() {
+    public void incrementWriteErrorCount() {
         writeErrors.getAndIncrement();
     }
 
@@ -100,7 +100,7 @@ public class ClientStatisticsMXBeanImpl implements DefaultPersistorStatisticsMXB
         recordsRead.getAndIncrement();
     }
 
-    public void incremementReadErrorCount() {
+    public void incrementReadErrorCount() {
         readErrors.getAndIncrement();
     }
 
