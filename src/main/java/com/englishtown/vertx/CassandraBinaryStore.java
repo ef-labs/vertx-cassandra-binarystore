@@ -157,14 +157,14 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         //Register the statistic bean for files
         filesStatsBean = new ClientStatisticsMXBeanImpl();
         final Hashtable<String, String> fileStatsBeanKeys = new Hashtable<>();
-        fileStatsBeanKeys.put("subtype", "CassandraStatistics");
+        fileStatsBeanKeys.put("subtype", "PersistorStatistics");
         fileStatsBeanKeys.put("type", "files");
         BeanManager.INSTANCE.registerBean(filesStatsBean, fileStatsBeanKeys);
 
         //Register the statistic bean for chunks
         chunksStatsBean= new ClientStatisticsMXBeanImpl();
         final Hashtable<String, String> chunksStatsBeanKeys = new Hashtable<>();
-        chunksStatsBeanKeys.put("subtype", "CassandraStatistics");
+        chunksStatsBeanKeys.put("subtype", "PersistorStatistics");
         chunksStatsBeanKeys.put("type", "chunks");
         BeanManager.INSTANCE.registerBean(chunksStatsBean, chunksStatsBeanKeys);
 
