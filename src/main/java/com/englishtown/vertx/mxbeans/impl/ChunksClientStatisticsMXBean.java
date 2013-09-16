@@ -1,13 +1,19 @@
 package com.englishtown.vertx.mxbeans.impl;
 
+import com.englishtown.jmx.BeanManager;
 import com.englishtown.jmx.defaults.DefaultPersistorStatisticsMXBean;
 import org.apache.commons.math.stat.descriptive.SynchronizedSummaryStatistics;
 
+import java.util.Hashtable;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
+ * Defined as an enum to be a Singleton within the JVM, as if we have multiple instances of this verticle running we need them to all be
+ * referencing the same instance of this class.
  */
-public class ClientStatisticsMXBeanImpl implements DefaultPersistorStatisticsMXBean {
+public enum ChunksClientStatisticsMXBean implements DefaultPersistorStatisticsMXBean {
+    INSTANCE;
+
     private AtomicLong recordsWritten = new AtomicLong();
     private AtomicLong writeErrors = new AtomicLong();
 
@@ -16,6 +22,17 @@ public class ClientStatisticsMXBeanImpl implements DefaultPersistorStatisticsMXB
 
     private SynchronizedSummaryStatistics readStatistics = new SynchronizedSummaryStatistics();
     private SynchronizedSummaryStatistics writeStatistics = new SynchronizedSummaryStatistics();
+
+    private ChunksClientStatisticsMXBean() {
+        final Hashtable<String, String> chunksStatsBeanKeys = new Hashtable<>();
+        chunksStatsBeanKeys.put("subtype", "chunks");
+        chunksStatsBeanKeys.put("type", "PersistorStatistics");
+        try {
+            BeanManager.INSTANCE.registerBean(this, chunksStatsBeanKeys);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
     @Override
     public long getRecordsWritten() {
@@ -88,16 +105,8 @@ public class ClientStatisticsMXBeanImpl implements DefaultPersistorStatisticsMXB
         return readStatistics.getStandardDeviation();
     }
 
-    public void incrementWriteCount() {
-        recordsWritten.getAndIncrement();
-    }
-
     public void incrementWriteErrorCount() {
         writeErrors.getAndIncrement();
-    }
-
-    public void incrementReadCount() {
-        recordsRead.getAndIncrement();
     }
 
     public void incrementReadErrorCount() {
@@ -105,10 +114,12 @@ public class ClientStatisticsMXBeanImpl implements DefaultPersistorStatisticsMXB
     }
 
     public void addToReadStats(long milliseconds) {
+        recordsRead.getAndIncrement();
         readStatistics.addValue(milliseconds);
     }
 
     public void addToWriteStats(long milliseconds) {
+        recordsWritten.getAndIncrement();
         writeStatistics.addValue(milliseconds);
     }
 }
