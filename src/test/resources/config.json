@@ -1,3 +1,4 @@
 {
+    "consistency_level": "one",
     "ips": ["127.0.0.1"]
 }

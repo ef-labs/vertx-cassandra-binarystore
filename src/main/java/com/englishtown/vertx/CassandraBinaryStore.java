@@ -72,6 +72,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     protected Cluster cluster;
     protected Session session;
+    protected ConsistencyLevel queryConsistency;
     protected PreparedStatement insertChunk;
     protected PreparedStatement insertFile;
     protected PreparedStatement getChunk;
@@ -117,6 +118,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         // Build cluster and session
         cluster = builder.build();
         session = cluster.connect();
+
+        // Get query consistency level
+        queryConsistency = getQueryConsistencyLevel(config);
 
         ensureSchema();
         initPreparedStatements();
@@ -230,6 +234,43 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     }
 
+    public ConsistencyLevel getQueryConsistencyLevel(JsonObject config) {
+        String consistency = config.getString("consistency_level");
+
+        if (consistency == null || consistency.isEmpty()) {
+            return ConsistencyLevel.LOCAL_QUORUM;
+        }
+
+        if (consistency.equalsIgnoreCase("ANY")) {
+            return ConsistencyLevel.ANY;
+        }
+        if (consistency.equalsIgnoreCase("ONE")) {
+            return ConsistencyLevel.ONE;
+        }
+        if (consistency.equalsIgnoreCase("TWO")) {
+            return ConsistencyLevel.TWO;
+        }
+        if (consistency.equalsIgnoreCase("THREE")) {
+            return ConsistencyLevel.THREE;
+        }
+        if (consistency.equalsIgnoreCase("QUORUM")) {
+            return ConsistencyLevel.QUORUM;
+        }
+        if (consistency.equalsIgnoreCase("ALL")) {
+            return ConsistencyLevel.ALL;
+        }
+        if (consistency.equalsIgnoreCase("LOCAL_QUORUM")) {
+            return ConsistencyLevel.LOCAL_QUORUM;
+        }
+        if (consistency.equalsIgnoreCase("EACH_QUORUM")) {
+            return ConsistencyLevel.EACH_QUORUM;
+        }
+
+        // Default to local quorum consistency
+        return ConsistencyLevel.LOCAL_QUORUM;
+
+    }
+
     public void initPreparedStatements() {
 
         String query = QueryBuilder
@@ -239,7 +280,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .value("data", bindMarker())
                 .getQueryString();
 
-        this.insertChunk = session.prepare(query);
+        this.insertChunk = session
+                .prepare(query)
+                .setConsistencyLevel(queryConsistency);
 
         query = QueryBuilder
                 .insertInto(keyspace, "files")
@@ -252,7 +295,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .value("metadata", bindMarker())
                 .getQueryString();
 
-        this.insertFile = session.prepare(query);
+        this.insertFile = session
+                .prepare(query)
+                .setConsistencyLevel(queryConsistency);
 
         query = QueryBuilder
                 .select()
@@ -261,7 +306,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .where(eq("id", bindMarker()))
                 .getQueryString();
 
-        this.getFile = session.prepare(query);
+        this.getFile = session
+                .prepare(query)
+                .setConsistencyLevel(queryConsistency);
 
         query = QueryBuilder
                 .select("data")
@@ -270,7 +317,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .and(eq("n", bindMarker()))
                 .getQueryString();
 
-        this.getChunk = session.prepare(query);
+        this.getChunk = session
+                .prepare(query)
+                .setConsistencyLevel(queryConsistency);
 
     }
 

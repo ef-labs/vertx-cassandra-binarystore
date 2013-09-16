@@ -84,6 +84,7 @@ public class CassandraBinaryStoreTest {
 
         when(session.prepare(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.bind(anyVararg())).thenReturn(boundStatement);
+        when(preparedStatement.setConsistencyLevel(any(ConsistencyLevel.class))).thenReturn(preparedStatement);
         when(session.executeAsync(any(Query.class))).thenReturn(resultSetFuture);
 
         binaryStore = new CassandraBinaryStore(provider);
@@ -225,6 +226,56 @@ public class CassandraBinaryStoreTest {
 
         JsonObject reply = jsonCaptor.getValue();
         assertEquals("ok", reply.getString("status"));
+    }
+
+    @Test
+    public void testGetQueryConsistencyLevel() throws Exception {
+        JsonObject config = new JsonObject();
+        ConsistencyLevel consistency;
+
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
+
+        config.putString("consistency_level", "");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
+
+        config.putString("consistency_level", "invalid value");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
+
+        config.putString("consistency_level", "one");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.ONE, consistency);
+
+        config.putString("consistency_level", "two");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.TWO, consistency);
+
+        config.putString("consistency_level", "three");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.THREE, consistency);
+
+        config.putString("consistency_level", "any");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.ANY, consistency);
+
+        config.putString("consistency_level", "quorum");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.QUORUM, consistency);
+
+        config.putString("consistency_level", "all");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.ALL, consistency);
+
+        config.putString("consistency_level", "local_quorum");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
+
+        config.putString("consistency_level", "each_quorum");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.EACH_QUORUM, consistency);
+
     }
 
     @Test
