@@ -1,6 +1,8 @@
 package com.englishtown.vertx;
 
 import com.datastax.driver.core.*;
+import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
+import com.datastax.driver.core.policies.RoundRobinPolicy;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -21,7 +23,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -234,15 +236,19 @@ public class CassandraBinaryStoreTest {
         ConsistencyLevel consistency;
 
         consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
+        assertNull(consistency);
 
         config.putString("consistency_level", "");
         consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
+        assertNull(consistency);
 
-        config.putString("consistency_level", "invalid value");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
+        try {
+            config.putString("consistency_level", "invalid value");
+            binaryStore.getQueryConsistencyLevel(config);
+            fail();
+        } catch (IllegalArgumentException e) {
+            // Expected exception
+        }
 
         config.putString("consistency_level", "one");
         consistency = binaryStore.getQueryConsistencyLevel(config);
@@ -275,6 +281,82 @@ public class CassandraBinaryStoreTest {
         config.putString("consistency_level", "each_quorum");
         consistency = binaryStore.getQueryConsistencyLevel(config);
         assertEquals(ConsistencyLevel.EACH_QUORUM, consistency);
+
+    }
+
+    @Test
+    public void testInitPoolingOptions() throws Exception {
+
+        Cluster.Builder builder = mock(Cluster.Builder.class);
+        PoolingOptions poolingOptions = mock(PoolingOptions.class);
+
+        when(builder.poolingOptions()).thenReturn(poolingOptions);
+
+        JsonObject config = new JsonObject()
+                .putObject("pooling", new JsonObject()
+                        .putNumber("core_connections_per_host_local", 1)
+                        .putNumber("core_connections_per_host_remote", 2)
+                        .putNumber("max_connections_per_host_local", 3)
+                        .putNumber("max_connections_per_host_remote", 4)
+                        .putNumber("min_simultaneous_requests_local", 5)
+                        .putNumber("min_simultaneous_requests_remote", 6)
+                        .putNumber("max_simultaneous_requests_local", 7)
+                        .putNumber("max_simultaneous_requests_remote", 8)
+                );
+
+        binaryStore.initPoolingOptions(builder, config);
+
+        verify(poolingOptions).setCoreConnectionsPerHost(eq(HostDistance.LOCAL), eq(1));
+        verify(poolingOptions).setCoreConnectionsPerHost(eq(HostDistance.REMOTE), eq(2));
+
+        verify(poolingOptions).setMaxConnectionsPerHost(eq(HostDistance.LOCAL), eq(3));
+        verify(poolingOptions).setMaxConnectionsPerHost(eq(HostDistance.REMOTE), eq(4));
+
+        verify(poolingOptions).setMinSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.LOCAL), eq(5));
+        verify(poolingOptions).setMinSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.REMOTE), eq(6));
+
+        verify(poolingOptions).setMaxSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.LOCAL), eq(7));
+        verify(poolingOptions).setMaxSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.REMOTE), eq(8));
+    }
+
+    @Test
+    public void testInitPolicies_DCAwareRoundRobinPolicy() throws Exception {
+
+        Cluster.Builder builder = mock(Cluster.Builder.class);
+        PoolingOptions poolingOptions = mock(PoolingOptions.class);
+
+        when(builder.poolingOptions()).thenReturn(poolingOptions);
+
+        JsonObject config = new JsonObject()
+                .putObject("policies", new JsonObject()
+                        .putObject("load_balancing", new JsonObject()
+                                .putString("name", "DCAwareRoundRobinPolicy")
+                                .putString("local_dc", "datacenter1")
+                        )
+                );
+
+        binaryStore.initPolicies(builder, config);
+        verify(builder).withLoadBalancingPolicy(any(DCAwareRoundRobinPolicy.class));
+
+    }
+
+    @Test
+    public void testInitPolicies_RoundRobinPolicy() throws Exception {
+
+        Cluster.Builder builder = mock(Cluster.Builder.class);
+        PoolingOptions poolingOptions = mock(PoolingOptions.class);
+
+        when(builder.poolingOptions()).thenReturn(poolingOptions);
+
+        JsonObject config = new JsonObject()
+                .putObject("policies", new JsonObject()
+                        .putObject("load_balancing", new JsonObject()
+                                .putString("name", "com.datastax.driver.core.policies.RoundRobinPolicy")
+                        )
+                );
+
+        binaryStore.initPolicies(builder, config);
+        verify(builder).withLoadBalancingPolicy(any(RoundRobinPolicy.class));
 
     }
 

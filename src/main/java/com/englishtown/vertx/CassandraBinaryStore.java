@@ -25,6 +25,8 @@ package com.englishtown.vertx;
 
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.AlreadyExistsException;
+import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
+import com.datastax.driver.core.policies.LoadBalancingPolicy;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.englishtown.jmx.BeanManager;
 import com.englishtown.vertx.mxbeans.impl.CassandraGeneralInfoMXBeanImpl;
@@ -73,7 +75,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     protected Cluster cluster;
     protected Session session;
-    protected ConsistencyLevel queryConsistency;
     protected PreparedStatement insertChunk;
     protected PreparedStatement insertFile;
     protected PreparedStatement getChunk;
@@ -101,32 +102,16 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         config = container.config();
         address = config.getString("address", DEFAULT_ADDRESS);
 
-        // Get array of IPs, default to localhost
-        JsonArray ips = config.getArray("ips");
-        if (ips == null || ips.size() == 0) {
-            ips = new JsonArray().addString("127.0.0.1");
-        }
-
         // Get keyspace, default to binarystore
         keyspace = config.getString("keyspace", "binarystore");
 
-        // Create cluster builder
-        Cluster.Builder builder = clusterBuilderProvider.get();
-
-        // Add cassandra cluster contact points
-        for (int i = 0; i < ips.size(); i++) {
-            builder.addContactPoint(ips.<String>get(i));
-        }
-
         // Build cluster and session
+        Cluster.Builder builder = getBuilder(config);
         cluster = builder.build();
         session = cluster.connect();
 
-        // Get query consistency level
-        queryConsistency = getQueryConsistencyLevel(config);
-
         ensureSchema();
-        initPreparedStatements();
+        initPreparedStatements(config);
 
         // Main Message<JsonObject> handler that inspects an "action" field
         eb.registerHandler(address, this);
@@ -150,6 +135,124 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         }
 
         startedResult.setResult(null);
+    }
+
+    public Cluster.Builder getBuilder(JsonObject config) {
+
+        // Create cluster builder
+        Cluster.Builder builder = clusterBuilderProvider.get();
+
+        // Get array of IPs, default to localhost
+        JsonArray ips = config.getArray("ips");
+        if (ips == null || ips.size() == 0) {
+            ips = new JsonArray().addString("127.0.0.1");
+        }
+
+        // Add cassandra cluster contact points
+        for (int i = 0; i < ips.size(); i++) {
+            builder.addContactPoint(ips.<String>get(i));
+        }
+
+        initPoolingOptions(builder, config);
+        initPolicies(builder, config);
+
+        return builder;
+    }
+
+    public void initPoolingOptions(Cluster.Builder builder, JsonObject config) {
+
+        JsonObject poolingConfig = config.getObject("pooling");
+
+        if (poolingConfig == null) {
+            return;
+        }
+
+        PoolingOptions poolingOptions = builder.poolingOptions();
+
+        Integer core_connections_per_host_local = poolingConfig.getInteger("core_connections_per_host_local");
+        Integer core_connections_per_host_remote = poolingConfig.getInteger("core_connections_per_host_remote");
+        Integer max_connections_per_host_local = poolingConfig.getInteger("max_connections_per_host_local");
+        Integer max_connections_per_host_remote = poolingConfig.getInteger("max_connections_per_host_remote");
+        Integer min_simultaneous_requests_local = poolingConfig.getInteger("min_simultaneous_requests_local");
+        Integer min_simultaneous_requests_remote = poolingConfig.getInteger("min_simultaneous_requests_remote");
+        Integer max_simultaneous_requests_local = poolingConfig.getInteger("max_simultaneous_requests_local");
+        Integer max_simultaneous_requests_remote = poolingConfig.getInteger("max_simultaneous_requests_remote");
+
+        if (core_connections_per_host_local != null) {
+            poolingOptions.setCoreConnectionsPerHost(HostDistance.LOCAL, core_connections_per_host_local.intValue());
+        }
+        if (core_connections_per_host_remote != null) {
+            poolingOptions.setCoreConnectionsPerHost(HostDistance.REMOTE, core_connections_per_host_remote.intValue());
+        }
+        if (max_connections_per_host_local != null) {
+            poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, max_connections_per_host_local.intValue());
+        }
+        if (max_connections_per_host_remote != null) {
+            poolingOptions.setMaxConnectionsPerHost(HostDistance.REMOTE, max_connections_per_host_remote.intValue());
+        }
+        if (min_simultaneous_requests_local != null) {
+            poolingOptions.setMinSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL, min_simultaneous_requests_local.intValue());
+        }
+        if (min_simultaneous_requests_remote != null) {
+            poolingOptions.setMinSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE, min_simultaneous_requests_remote.intValue());
+        }
+        if (max_simultaneous_requests_local != null) {
+            poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL, max_simultaneous_requests_local.intValue());
+        }
+        if (max_simultaneous_requests_remote != null) {
+            poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE, max_simultaneous_requests_remote.intValue());
+        }
+
+    }
+
+    public void initPolicies(Cluster.Builder builder, JsonObject config) {
+
+        JsonObject policyConfig = config.getObject("policies");
+
+        if (policyConfig == null) {
+            return;
+        }
+
+        JsonObject loadBalancing = policyConfig.getObject("load_balancing");
+        if (loadBalancing != null) {
+            String name = loadBalancing.getString("name");
+
+            if (name == null || name.isEmpty()) {
+                throw new IllegalArgumentException("A load balancing policy must have a class name field");
+
+            } else if ("DCAwareRoundRobinPolicy".equalsIgnoreCase(name)
+                    || "com.datastax.driver.core.policies.DCAwareRoundRobinPolicy".equalsIgnoreCase(name)) {
+
+                String localDc = loadBalancing.getString("local_dc");
+                int usedHostsPerRemoteDc = loadBalancing.getInteger("used_hosts_per_remote_dc", 0);
+
+                if (localDc == null || localDc.isEmpty()) {
+                    throw new IllegalArgumentException("A DCAwareRoundRobinPolicy requires a local_dc in configuration.");
+                }
+
+                builder.withLoadBalancingPolicy(new DCAwareRoundRobinPolicy(localDc, usedHostsPerRemoteDc));
+
+            } else {
+
+                Class<?> clazz;
+                try {
+                    clazz = Thread.currentThread().getContextClassLoader().loadClass(name);
+                } catch (ClassNotFoundException e) {
+                    throw new RuntimeException(e);
+                }
+                if (LoadBalancingPolicy.class.isAssignableFrom(clazz)) {
+                    try {
+                        builder.withLoadBalancingPolicy((LoadBalancingPolicy) clazz.newInstance());
+                    } catch (IllegalAccessException | InstantiationException e) {
+                        throw new RuntimeException(e);
+                    }
+                } else {
+                    throw new IllegalArgumentException("Class " + name + " does not implement LoadBalancingPolicy");
+                }
+
+            }
+        }
+
     }
 
     private void registerBeans() throws MalformedObjectNameException, NotCompliantMBeanException, InstanceAlreadyExistsException, MBeanRegistrationException {
@@ -226,7 +329,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         String consistency = config.getString("consistency_level");
 
         if (consistency == null || consistency.isEmpty()) {
-            return ConsistencyLevel.LOCAL_QUORUM;
+            return null;
         }
 
         if (consistency.equalsIgnoreCase("ANY")) {
@@ -254,12 +357,10 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return ConsistencyLevel.EACH_QUORUM;
         }
 
-        // Default to local quorum consistency
-        return ConsistencyLevel.LOCAL_QUORUM;
-
+        throw new IllegalArgumentException("'" + consistency + "' is not a valid consistency level.");
     }
 
-    public void initPreparedStatements() {
+    public void initPreparedStatements(JsonObject config) {
 
         String query = QueryBuilder
                 .insertInto(keyspace, "chunks")
@@ -268,9 +369,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .value("data", bindMarker())
                 .getQueryString();
 
-        this.insertChunk = session
-                .prepare(query)
-                .setConsistencyLevel(queryConsistency);
+        this.insertChunk = session.prepare(query);
 
         query = QueryBuilder
                 .insertInto(keyspace, "files")
@@ -283,9 +382,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .value("metadata", bindMarker())
                 .getQueryString();
 
-        this.insertFile = session
-                .prepare(query)
-                .setConsistencyLevel(queryConsistency);
+        this.insertFile = session.prepare(query);
 
         query = QueryBuilder
                 .select()
@@ -294,9 +391,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .where(eq("id", bindMarker()))
                 .getQueryString();
 
-        this.getFile = session
-                .prepare(query)
-                .setConsistencyLevel(queryConsistency);
+        this.getFile = session.prepare(query);
 
         query = QueryBuilder
                 .select("data")
@@ -305,9 +400,16 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .and(eq("n", bindMarker()))
                 .getQueryString();
 
-        this.getChunk = session
-                .prepare(query)
-                .setConsistencyLevel(queryConsistency);
+        this.getChunk = session.prepare(query);
+
+        // Get query consistency level
+        ConsistencyLevel consistency = getQueryConsistencyLevel(config);
+        if (consistency != null) {
+            insertChunk.setConsistencyLevel(consistency);
+            insertFile.setConsistencyLevel(consistency);
+            getFile.setConsistencyLevel(consistency);
+            getChunk.setConsistencyLevel(consistency);
+        }
 
     }
 
