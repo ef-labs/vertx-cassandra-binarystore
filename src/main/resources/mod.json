@@ -2,9 +2,9 @@
     "main": "com.englishtown.vertx.CassandraBinaryStore",
     "worker": true,
     "multi-threaded": true,
-    "includes": "com.englishtown~vertx-mod-hk2~1.0.0-final",
+    "includes": "com.englishtown~vertx-mod-hk2~1.5.0-final",
 
-    "description": "Read and write binary files to Cassandra in chunks",
+    "description": "Read and write binary files to Cassandra in chunks v2",
     "licenses": ["The MIT License"],
     "author": "adrianluisgonzalez",
     "keywords": ["Cassandra", "binary store"],

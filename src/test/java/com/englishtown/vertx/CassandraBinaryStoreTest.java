@@ -1,12 +1,15 @@
 package com.englishtown.vertx;
 
 import com.datastax.driver.core.*;
+import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
+import com.datastax.driver.core.policies.RoundRobinPolicy;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
+import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.Vertx;
 import org.vertx.java.core.eventbus.EventBus;
@@ -20,7 +23,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -60,6 +63,9 @@ public class CassandraBinaryStoreTest {
     BoundStatement boundStatement;
     @Mock
     ResultSetFuture resultSetFuture;
+    @Mock
+    Future<Void> startedResult;
+
 
     @Before
     public void setUp() throws Exception {
@@ -80,16 +86,18 @@ public class CassandraBinaryStoreTest {
 
         when(session.prepare(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.bind(anyVararg())).thenReturn(boundStatement);
+        when(preparedStatement.setConsistencyLevel(any(ConsistencyLevel.class))).thenReturn(preparedStatement);
         when(session.executeAsync(any(Query.class))).thenReturn(resultSetFuture);
 
         binaryStore = new CassandraBinaryStore(provider);
         binaryStore.setVertx(vertx);
         binaryStore.setContainer(container);
 
-        binaryStore.start();
+        binaryStore.start(startedResult);
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testStart() throws Exception {
         // Start is called during setUp(), just run verifications
         verify(provider).get();
@@ -220,6 +228,136 @@ public class CassandraBinaryStoreTest {
 
         JsonObject reply = jsonCaptor.getValue();
         assertEquals("ok", reply.getString("status"));
+    }
+
+    @Test
+    public void testGetQueryConsistencyLevel() throws Exception {
+        JsonObject config = new JsonObject();
+        ConsistencyLevel consistency;
+
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertNull(consistency);
+
+        config.putString("consistency_level", "");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertNull(consistency);
+
+        try {
+            config.putString("consistency_level", "invalid value");
+            binaryStore.getQueryConsistencyLevel(config);
+            fail();
+        } catch (IllegalArgumentException e) {
+            // Expected exception
+        }
+
+        config.putString("consistency_level", "one");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.ONE, consistency);
+
+        config.putString("consistency_level", "two");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.TWO, consistency);
+
+        config.putString("consistency_level", "three");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.THREE, consistency);
+
+        config.putString("consistency_level", "any");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.ANY, consistency);
+
+        config.putString("consistency_level", "quorum");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.QUORUM, consistency);
+
+        config.putString("consistency_level", "all");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.ALL, consistency);
+
+        config.putString("consistency_level", "local_quorum");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
+
+        config.putString("consistency_level", "each_quorum");
+        consistency = binaryStore.getQueryConsistencyLevel(config);
+        assertEquals(ConsistencyLevel.EACH_QUORUM, consistency);
+
+    }
+
+    @Test
+    public void testInitPoolingOptions() throws Exception {
+
+        Cluster.Builder builder = mock(Cluster.Builder.class);
+        PoolingOptions poolingOptions = mock(PoolingOptions.class);
+
+        when(builder.poolingOptions()).thenReturn(poolingOptions);
+
+        JsonObject config = new JsonObject()
+                .putObject("pooling", new JsonObject()
+                        .putNumber("core_connections_per_host_local", 1)
+                        .putNumber("core_connections_per_host_remote", 2)
+                        .putNumber("max_connections_per_host_local", 3)
+                        .putNumber("max_connections_per_host_remote", 4)
+                        .putNumber("min_simultaneous_requests_local", 5)
+                        .putNumber("min_simultaneous_requests_remote", 6)
+                        .putNumber("max_simultaneous_requests_local", 7)
+                        .putNumber("max_simultaneous_requests_remote", 8)
+                );
+
+        binaryStore.initPoolingOptions(builder, config);
+
+        verify(poolingOptions).setCoreConnectionsPerHost(eq(HostDistance.LOCAL), eq(1));
+        verify(poolingOptions).setCoreConnectionsPerHost(eq(HostDistance.REMOTE), eq(2));
+
+        verify(poolingOptions).setMaxConnectionsPerHost(eq(HostDistance.LOCAL), eq(3));
+        verify(poolingOptions).setMaxConnectionsPerHost(eq(HostDistance.REMOTE), eq(4));
+
+        verify(poolingOptions).setMinSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.LOCAL), eq(5));
+        verify(poolingOptions).setMinSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.REMOTE), eq(6));
+
+        verify(poolingOptions).setMaxSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.LOCAL), eq(7));
+        verify(poolingOptions).setMaxSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.REMOTE), eq(8));
+    }
+
+    @Test
+    public void testInitPolicies_DCAwareRoundRobinPolicy() throws Exception {
+
+        Cluster.Builder builder = mock(Cluster.Builder.class);
+        PoolingOptions poolingOptions = mock(PoolingOptions.class);
+
+        when(builder.poolingOptions()).thenReturn(poolingOptions);
+
+        JsonObject config = new JsonObject()
+                .putObject("policies", new JsonObject()
+                        .putObject("load_balancing", new JsonObject()
+                                .putString("name", "DCAwareRoundRobinPolicy")
+                                .putString("local_dc", "datacenter1")
+                        )
+                );
+
+        binaryStore.initPolicies(builder, config);
+        verify(builder).withLoadBalancingPolicy(any(DCAwareRoundRobinPolicy.class));
+
+    }
+
+    @Test
+    public void testInitPolicies_RoundRobinPolicy() throws Exception {
+
+        Cluster.Builder builder = mock(Cluster.Builder.class);
+        PoolingOptions poolingOptions = mock(PoolingOptions.class);
+
+        when(builder.poolingOptions()).thenReturn(poolingOptions);
+
+        JsonObject config = new JsonObject()
+                .putObject("policies", new JsonObject()
+                        .putObject("load_balancing", new JsonObject()
+                                .putString("name", "com.datastax.driver.core.policies.RoundRobinPolicy")
+                        )
+                );
+
+        binaryStore.initPolicies(builder, config);
+        verify(builder).withLoadBalancingPolicy(any(RoundRobinPolicy.class));
+
     }
 
     @Test
