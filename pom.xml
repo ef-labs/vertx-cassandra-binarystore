@@ -20,7 +20,7 @@
         <cassandra.driver.version>1.0.3</cassandra.driver.version>
         <snappy.version>1.0.5</snappy.version>
         <mockito.version>1.9.5</mockito.version>
-        <vertx.mod.hk2.version>1.4.0-final</vertx.mod.hk2.version>
+        <vertx.mod.hk2.version>1.5.0-final</vertx.mod.hk2.version>
     </properties>
 
     <dependencies>
