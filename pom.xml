@@ -21,6 +21,8 @@
         <snappy.version>1.0.5</snappy.version>
         <mockito.version>1.9.5</mockito.version>
         <vertx.mod.hk2.version>1.5.0-final</vertx.mod.hk2.version>
+        <jmx.bean.management.version>1.1.0-final</jmx.bean.management.version>
+        <commons.math.version>2.2</commons.math.version>
     </properties>
 
     <dependencies>
@@ -58,12 +60,12 @@
         <dependency>
             <groupId>com.englishtown</groupId>
             <artifactId>jmx-bean-management</artifactId>
-            <version>1.0.0-SNAPSHOT</version>
+            <version>${jmx.bean.management.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-math</artifactId>
-            <version>2.2</version>
+            <version>${commons.math.version}</version>
         </dependency>
 
         <!--Test dependencies-->
