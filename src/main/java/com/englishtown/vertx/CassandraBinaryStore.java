@@ -589,7 +589,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 Row row = result.one();
                 if (row == null) {
                     filesStatsBean.incrementReadErrorCount();
-                    sendError(message, "File " + id.toString() + " does not exist");
+                    sendError(message, "File " + id.toString() + " does not exist", 404);
                     return;
                 }
 
@@ -691,12 +691,23 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     }
 
     public <T> void sendError(Message<T> message, String error) {
-        sendError(message, error, null);
+        sendError(message, error, null, null);
     }
 
     public <T> void sendError(Message<T> message, String error, Throwable e) {
+        sendError(message, error, null, e);
+    }
+
+    public <T> void sendError(Message<T> message, String error, Integer reason) {
+        sendError(message, error, reason, null);
+    }
+
+    public <T> void sendError(Message<T> message, String error, Integer reason, Throwable e) {
         logger.error(error, e);
         JsonObject result = new JsonObject().putString("status", "error").putString("message", error);
+        if (reason != null) {
+            result.putNumber("reason", reason);
+        }
         message.reply(result);
     }
 
