@@ -21,8 +21,6 @@
         <mockito.version>1.9.5</mockito.version>
         <vertx.mod.hk2.version>1.5.0-final</vertx.mod.hk2.version>
         <vertx.mod.metrics.version>1.0.0-SNAPSHOT</vertx.mod.metrics.version>
-        <jmx.bean.management.version>1.1.0-final</jmx.bean.management.version>
-        <commons.math.version>2.2</commons.math.version>
     </properties>
 
     <dependencies>
@@ -56,16 +54,6 @@
             <artifactId>vertx-mod-hk2</artifactId>
             <version>${vertx.mod.hk2.version}</version>
             <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.englishtown</groupId>
-            <artifactId>jmx-bean-management</artifactId>
-            <version>${jmx.bean.management.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-math</artifactId>
-            <version>${commons.math.version}</version>
         </dependency>
         <dependency>
             <groupId>com.englishtown</groupId>
