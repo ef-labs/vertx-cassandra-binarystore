@@ -2,11 +2,7 @@ package com.englishtown.vertx;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.SharedMetricRegistries;
 import com.codahale.metrics.Timer;
-import com.englishtown.vertx.hk2.MetricsBinder;
-
-import javax.inject.Provider;
 
 import static com.codahale.metrics.MetricRegistry.name;
 
@@ -20,13 +16,15 @@ public class Metrics {
     private final Counter readErrors;
     private final Counter writeErrors;
 
+    public final static String BASE_NAME = "com.englishtown.vertx.cassandra.binarystore";
+
     public Metrics(MetricRegistry registry, String type) {
 
-        readTimer = registry.timer(name(Metrics.class, type, "read", "success"));
-        writeTimer = registry.timer(name(Metrics.class, type, "write", "success"));
+        readTimer = registry.timer(name(BASE_NAME, type, "read", "success"));
+        writeTimer = registry.timer(name(BASE_NAME, type, "write", "success"));
 
-        readErrors = registry.counter(name(Metrics.class, type, "read", "errors"));
-        writeErrors = registry.counter(name(Metrics.class, type, "write", "errors"));
+        readErrors = registry.counter(name(BASE_NAME, type, "read", "errors"));
+        writeErrors = registry.counter(name(BASE_NAME, type, "write", "errors"));
     }
 
     public Context timeRead() {
