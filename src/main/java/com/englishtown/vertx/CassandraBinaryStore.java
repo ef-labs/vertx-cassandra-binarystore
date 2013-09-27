@@ -32,7 +32,6 @@ import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.englishtown.vertx.hk2.MetricsBinder;
-import com.englishtown.vertx.metrics.VertxEventLoopGauges;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import org.vertx.java.core.Future;
@@ -49,6 +48,8 @@ import javax.inject.Inject;
 import javax.inject.Provider;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import static com.datastax.driver.core.querybuilder.QueryBuilder.bindMarker;
@@ -127,12 +128,10 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         });
 
         // Start jmx metric reporter if enabled
-        if (container.config().getBoolean("jmx-reporter", false)) {
-            // TODO: Add metrics about verticle and configuration
-            (new VertxEventLoopGauges(vertx, container)).register(registry);
-            reporter = JmxReporter.forRegistry(registry).build();
-            reporter.start();
-        }
+        Map<String, Object> values = new HashMap<>();
+        values.put("address", address);
+        values.put("keyspace", keyspace);
+        reporter = com.englishtown.vertx.metrics.Utils.create(this, registry, values, config);
 
         startedResult.setResult(null);
     }
