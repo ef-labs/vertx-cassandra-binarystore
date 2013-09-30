@@ -1,5 +1,6 @@
 package com.englishtown.vertx;
 
+import com.codahale.metrics.MetricRegistry;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.RoundRobinPolicy;
@@ -65,6 +66,8 @@ public class CassandraBinaryStoreTest {
     ResultSetFuture resultSetFuture;
     @Mock
     Future<Void> startedResult;
+    @Mock
+    Provider<MetricRegistry> registryProvider;
 
 
     @Before
@@ -89,7 +92,7 @@ public class CassandraBinaryStoreTest {
         when(preparedStatement.setConsistencyLevel(any(ConsistencyLevel.class))).thenReturn(preparedStatement);
         when(session.executeAsync(any(Query.class))).thenReturn(resultSetFuture);
 
-        binaryStore = new CassandraBinaryStore(provider);
+        binaryStore = new CassandraBinaryStore(provider, registryProvider);
         binaryStore.setVertx(vertx);
         binaryStore.setContainer(container);
 

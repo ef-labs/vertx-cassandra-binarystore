@@ -23,16 +23,15 @@
 
 package com.englishtown.vertx;
 
+import com.codahale.metrics.JmxReporter;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.SharedMetricRegistries;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.AlreadyExistsException;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
-import com.englishtown.jmx.BeanManager;
-import com.englishtown.vertx.mxbeans.impl.CassandraGeneralInfoMXBeanImpl;
-import com.englishtown.vertx.mxbeans.impl.ChunksClientStatisticsMXBean;
-import com.englishtown.vertx.mxbeans.impl.FilesClientStatisticsMXBean;
-import com.google.common.base.Stopwatch;
+import com.englishtown.vertx.hk2.MetricsBinder;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import org.vertx.java.core.Future;
@@ -47,15 +46,11 @@ import org.vertx.java.platform.Verticle;
 
 import javax.inject.Inject;
 import javax.inject.Provider;
-import javax.management.InstanceAlreadyExistsException;
-import javax.management.MBeanRegistrationException;
-import javax.management.MalformedObjectNameException;
-import javax.management.NotCompliantMBeanException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
-import java.util.Hashtable;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import static com.datastax.driver.core.querybuilder.QueryBuilder.bindMarker;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
@@ -67,6 +62,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     public static final String DEFAULT_ADDRESS = "et.cassandra.binarystore";
     private final Provider<Cluster.Builder> clusterBuilderProvider;
+    private final MetricRegistry registry;
+    private final Metrics fileMetrics;
+    private final Metrics chunkMetrics;
 
     protected EventBus eb;
     protected Logger logger;
@@ -81,17 +79,22 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     protected PreparedStatement getFile;
     private String address;
     private JsonObject config;
-    private FilesClientStatisticsMXBean filesStatsBean;
-    private ChunksClientStatisticsMXBean chunksStatsBean;
+    private JmxReporter reporter;
 
     @Inject
-    public CassandraBinaryStore(Provider<Cluster.Builder> clusterBuilderProvider) {
+    public CassandraBinaryStore(Provider<Cluster.Builder> clusterBuilderProvider, Provider<MetricRegistry> registryProvider) {
         if (clusterBuilderProvider == null) {
             throw new IllegalArgumentException("clusterBuilderProvider is required");
         }
         this.clusterBuilderProvider = clusterBuilderProvider;
-        this.filesStatsBean = FilesClientStatisticsMXBean.INSTANCE;
-        this.chunksStatsBean = ChunksClientStatisticsMXBean.INSTANCE;
+
+        MetricRegistry registry = registryProvider.get();
+        if (registry == null) {
+            registry = SharedMetricRegistries.getOrCreate(MetricsBinder.SHARED_REGISTRY_NAME);
+        }
+        this.registry = registry;
+        this.fileMetrics = new Metrics(registry, "files");
+        this.chunkMetrics = new Metrics(registry, "chunks");
     }
 
     @Override
@@ -124,15 +127,11 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             }
         });
 
-        if (BeanManager.INSTANCE.isEnabled()) {
-            try {
-                registerBeans();
-            } catch (Exception e) {
-                startedResult.setFailure(e);
-                startedResult.failed();
-                return;
-            }
-        }
+        // Start jmx metric reporter if enabled
+        Map<String, Object> values = new HashMap<>();
+        values.put("address", address);
+        values.put("keyspace", keyspace);
+        reporter = com.englishtown.vertx.metrics.Utils.create(this, registry, values, config);
 
         startedResult.setResult(null);
     }
@@ -255,16 +254,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     }
 
-    private void registerBeans() throws MalformedObjectNameException, NotCompliantMBeanException, InstanceAlreadyExistsException, MBeanRegistrationException {
-        // Register General Info Bean
-        final CassandraGeneralInfoMXBeanImpl generalInfoMXBean = new CassandraGeneralInfoMXBeanImpl(address, container.config(),
-                vertx.isWorker(), config.getArray("ips"));
-        final Hashtable<String, String> generalInfoKeys = new Hashtable<>();
-        generalInfoKeys.put("type", "GeneralInfo");
-        generalInfoKeys.put("verticle", this.getClass().getSimpleName());
-        BeanManager.INSTANCE.registerBean(generalInfoMXBean, generalInfoKeys);
-    }
-
     @Override
     public void stop() {
         if (session != null) {
@@ -272,6 +261,9 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         }
         if (cluster != null) {
             cluster.shutdown();
+        }
+        if (reporter != null) {
+            reporter.stop();
         }
     }
 
@@ -417,7 +409,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     public void handle(Message<JsonObject> message) {
 
         JsonObject jsonObject = message.body();
-        String action = getRequiredString("action", message, jsonObject);
+        String action = getRequiredString("action", message, jsonObject, null);
         if (action == null) {
             return;
         }
@@ -434,29 +426,28 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                     saveFile(message, jsonObject);
                     break;
                 default:
-                    sendError(message, "action " + action + " is not supported");
+                    sendError(message, "action " + action + " is not supported", null);
             }
 
         } catch (Throwable e) {
-            sendError(message, "Unexpected error in " + action + ": " + e.getMessage(), e);
+            sendError(message, "Unexpected error in " + action + ": " + e.getMessage(), e, null);
         }
     }
 
     public void saveFile(final Message<JsonObject> message, JsonObject jsonObject) {
-        final Stopwatch stopwatch = new Stopwatch();
-        stopwatch.start();
+        final Metrics.Context context = fileMetrics.timeWrite();
 
-        UUID id = getUUID("id", message, jsonObject);
+        UUID id = getUUID("id", message, jsonObject, context);
         if (id == null) {
             return;
         }
 
-        Long length = getRequiredLong("length", message, jsonObject, 1);
+        Long length = getRequiredLong("length", message, jsonObject, 1, context);
         if (length == null) {
             return;
         }
 
-        Integer chunkSize = getRequiredInt("chunkSize", message, jsonObject, 1);
+        Integer chunkSize = getRequiredInt("chunkSize", message, jsonObject, 1, context);
         if (chunkSize == null) {
             return;
         }
@@ -474,18 +465,15 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
         BoundStatement query = insertFile.bind(id, length, chunkSize, uploadDate, filename, contentType, metadataStr);
 
-        executeQuery(query, message, new FutureCallback<ResultSet>() {
+        executeQuery(query, message, context, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
-                stopwatch.stop();
-                filesStatsBean.addToWriteStats(stopwatch.elapsed(TimeUnit.MILLISECONDS));
-                sendOK(message);
+                sendOK(message, context);
             }
 
             @Override
             public void onFailure(Throwable t) {
-                filesStatsBean.incrementWriteErrorCount();
-                sendError(message, "Error saving file", t);
+                sendError(message, "Error saving file", t, context);
             }
         });
 
@@ -498,6 +486,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
      *                the json fields, the remaining bytes are the file chunk to write to Cassandra
      */
     public void saveChunk(Message<Buffer> message) {
+        Metrics.Context context = chunkMetrics.timeWrite();
         JsonObject jsonObject;
         byte[] data;
 
@@ -505,8 +494,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         try {
             Buffer body = message.body();
             if (body.length() == 0) {
-                chunksStatsBean.incrementWriteErrorCount();
-                sendError(message, "message body is empty");
+                sendError(message, "message body is empty", context);
                 return;
             }
 
@@ -523,73 +511,64 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             data = body.getBytes(from, body.length());
 
         } catch (RuntimeException e) {
-            chunksStatsBean.incrementWriteErrorCount();
-            sendError(message, "error parsing buffer message.  see the documentation for the correct format", e);
+            sendError(message, "error parsing buffer message.  see the documentation for the correct format", e, context);
             return;
         }
 
         // Now save the chunk
-        saveChunk(message, jsonObject, data);
+        saveChunk(message, jsonObject, data, context);
 
     }
 
-    public void saveChunk(final Message<Buffer> message, JsonObject jsonObject, byte[] data) {
-        final Stopwatch stopwatch = new Stopwatch();
-        stopwatch.start();
+    public void saveChunk(final Message<Buffer> message, JsonObject jsonObject, byte[] data, final Metrics.Context context) {
 
         if (data == null || data.length == 0) {
-            chunksStatsBean.incrementWriteErrorCount();
-            sendError(message, "chunk data is missing");
+            sendError(message, "chunk data is missing", context);
             return;
         }
 
-        UUID id = getUUID("files_id", message, jsonObject);
+        UUID id = getUUID("files_id", message, jsonObject, context);
         if (id == null) {
             return;
         }
 
-        Integer n = getRequiredInt("n", message, jsonObject, 0);
+        Integer n = getRequiredInt("n", message, jsonObject, 0, context);
         if (n == null) {
             return;
         }
 
         BoundStatement insert = insertChunk.bind(id, n, ByteBuffer.wrap(data));
 
-        executeQuery(insert, message, new FutureCallback<ResultSet>() {
+        executeQuery(insert, message, context, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
-                stopwatch.stop();
-                chunksStatsBean.addToWriteStats(stopwatch.elapsed(TimeUnit.MILLISECONDS));
-                sendOK(message);
+                sendOK(message, context);
             }
 
             @Override
             public void onFailure(Throwable t) {
-                chunksStatsBean.incrementWriteErrorCount();
-                sendError(message, "Error saving chunk", t);
+                sendError(message, "Error saving chunk", t, context);
             }
         });
 
     }
 
     public void getFile(final Message<JsonObject> message, JsonObject jsonObject) {
-        final Stopwatch stopwatch = new Stopwatch();
-        stopwatch.start();
+        final Metrics.Context context = fileMetrics.timeRead();
 
-        final UUID id = getUUID("id", message, jsonObject);
+        final UUID id = getUUID("id", message, jsonObject, context);
         if (id == null) {
             return;
         }
 
         BoundStatement query = getFile.bind(id);
 
-        executeQuery(query, message, new FutureCallback<ResultSet>() {
+        executeQuery(query, message, context, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
                 Row row = result.one();
                 if (row == null) {
-                    filesStatsBean.incrementReadErrorCount();
-                    sendError(message, "File " + id.toString() + " does not exist", 404);
+                    sendError(message, "File " + id.toString() + " does not exist", 404, context);
                     return;
                 }
 
@@ -605,41 +584,35 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                     fileInfo.putObject("metadata", new JsonObject(metadata));
                 }
 
-                stopwatch.stop();
-                filesStatsBean.addToReadStats(stopwatch.elapsed(TimeUnit.MILLISECONDS));
-
                 // Send file info
-                sendOK(message, fileInfo);
+                sendOK(message, fileInfo, context);
             }
 
             @Override
             public void onFailure(Throwable t) {
-                filesStatsBean.incrementReadErrorCount();
-                sendError(message, "Error reading file", t);
+                sendError(message, "Error reading file", t, context);
             }
         });
 
     }
 
     public void getChunk(final Message<JsonObject> message, final JsonObject jsonObject) {
-        final Stopwatch stopwatch = new Stopwatch();
-        stopwatch.start();
+        final Metrics.Context context = chunkMetrics.timeRead();
 
-        UUID id = getUUID("files_id", message, jsonObject);
+        UUID id = getUUID("files_id", message, jsonObject, context);
 
-        Integer n = getRequiredInt("n", message, jsonObject, 0);
+        Integer n = getRequiredInt("n", message, jsonObject, 0, context);
         if (n == null) {
             return;
         }
 
         BoundStatement query = getChunk.bind(id, n);
 
-        executeQuery(query, message, new FutureCallback<ResultSet>() {
+        executeQuery(query, message, context, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
                 Row row = result.one();
                 if (row == null) {
-                    chunksStatsBean.incrementReadErrorCount();
                     message.reply(new byte[0]);
                     return;
                 }
@@ -647,9 +620,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 ByteBuffer bb = row.getBytes("data");
                 byte[] data = new byte[bb.remaining()];
                 bb.get(data);
-
-                stopwatch.stop();
-                chunksStatsBean.addToReadStats(stopwatch.elapsed(TimeUnit.MILLISECONDS));
 
                 boolean reply = jsonObject.getBoolean("reply", false);
                 Handler<Message<JsonObject>> replyHandler = null;
@@ -666,57 +636,63 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 }
 
                 // TODO: Change to reply with a Buffer instead of a byte[]?
+                context.stop();
                 message.reply(data, replyHandler);
             }
 
             @Override
             public void onFailure(Throwable t) {
-                chunksStatsBean.incrementReadErrorCount();
-                sendError(message, "Error reading chunk", t);
+                sendError(message, "Error reading chunk", t, context);
             }
         });
 
     }
 
-    public <T> void executeQuery(Query query, Message<T> message, final FutureCallback<ResultSet> callback) {
+    public <T> void executeQuery(Query query, Message<T> message, Metrics.Context context, final FutureCallback<ResultSet> callback) {
 
         try {
             final ResultSetFuture future = session.executeAsync(query);
             Futures.addCallback(future, callback);
 
         } catch (Throwable e) {
-            sendError(message, "Error executing async cassandra query", e);
+            sendError(message, "Error executing async cassandra query", e, context);
         }
 
     }
 
-    public <T> void sendError(Message<T> message, String error) {
-        sendError(message, error, null, null);
+    public <T> void sendError(Message<T> message, String error, Metrics.Context context) {
+        sendError(message, error, null, null, context);
     }
 
-    public <T> void sendError(Message<T> message, String error, Throwable e) {
-        sendError(message, error, null, e);
+    public <T> void sendError(Message<T> message, String error, Throwable e, Metrics.Context context) {
+        sendError(message, error, null, e, context);
     }
 
-    public <T> void sendError(Message<T> message, String error, Integer reason) {
-        sendError(message, error, reason, null);
+    public <T> void sendError(Message<T> message, String error, Integer reason, Metrics.Context context) {
+        sendError(message, error, reason, null, context);
     }
 
-    public <T> void sendError(Message<T> message, String error, Integer reason, Throwable e) {
+    public <T> void sendError(Message<T> message, String error, Integer reason, Throwable e, Metrics.Context context) {
         logger.error(error, e);
         JsonObject result = new JsonObject().putString("status", "error").putString("message", error);
         if (reason != null) {
             result.putNumber("reason", reason);
         }
+        if (context != null) {
+            context.error();
+        }
         message.reply(result);
     }
 
-    public <T> void sendOK(Message<T> message) {
-        sendOK(message, new JsonObject());
+    public <T> void sendOK(Message<T> message, Metrics.Context context) {
+        sendOK(message, new JsonObject(), context);
     }
 
-    public <T> void sendOK(Message<T> message, JsonObject response) {
+    public <T> void sendOK(Message<T> message, JsonObject response, Metrics.Context context) {
         response.putString("status", "ok");
+        if (context != null) {
+            context.stop();
+        }
         message.reply(response);
     }
 
@@ -729,48 +705,48 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         }
     }
 
-    private <T> UUID getUUID(String fieldName, Message<T> message, JsonObject jsonObject) {
-        String id = getRequiredString(fieldName, message, jsonObject);
+    private <T> UUID getUUID(String fieldName, Message<T> message, JsonObject jsonObject, Metrics.Context context) {
+        String id = getRequiredString(fieldName, message, jsonObject, context);
         if (id == null) {
             return null;
         }
         try {
             return UUID.fromString(id);
         } catch (IllegalArgumentException e) {
-            sendError(message, fieldName + " " + id + " is not a valid UUID", e);
+            sendError(message, fieldName + " " + id + " is not a valid UUID", e, context);
             return null;
         }
     }
 
-    private <T> String getRequiredString(String fieldName, Message<T> message, JsonObject jsonObject) {
+    private <T> String getRequiredString(String fieldName, Message<T> message, JsonObject jsonObject, Metrics.Context context) {
         String value = jsonObject.getString(fieldName);
         if (value == null) {
-            sendError(message, fieldName + " must be specified");
+            sendError(message, fieldName + " must be specified", context);
         }
         return value;
     }
 
-    private <T> Integer getRequiredInt(String fieldName, Message<T> message, JsonObject jsonObject, int minValue) {
+    private <T> Integer getRequiredInt(String fieldName, Message<T> message, JsonObject jsonObject, int minValue, Metrics.Context context) {
         Integer value = jsonObject.getInteger(fieldName);
         if (value == null) {
-            sendError(message, fieldName + " must be specified");
+            sendError(message, fieldName + " must be specified", context);
             return null;
         }
         if (value < minValue) {
-            sendError(message, fieldName + " must be greater than or equal to " + minValue);
+            sendError(message, fieldName + " must be greater than or equal to " + minValue, context);
             return null;
         }
         return value;
     }
 
-    private <T> Long getRequiredLong(String fieldName, Message<T> message, JsonObject jsonObject, long minValue) {
+    private <T> Long getRequiredLong(String fieldName, Message<T> message, JsonObject jsonObject, long minValue, Metrics.Context context) {
         Long value = jsonObject.getLong(fieldName);
         if (value == null) {
-            sendError(message, fieldName + " must be specified");
+            sendError(message, fieldName + " must be specified", context);
             return null;
         }
         if (value < minValue) {
-            sendError(message, fieldName + " must be greater than or equal to " + minValue);
+            sendError(message, fieldName + " must be greater than or equal to " + minValue, context);
             return null;
         }
         return value;

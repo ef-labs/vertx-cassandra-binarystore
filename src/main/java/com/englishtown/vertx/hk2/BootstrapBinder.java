@@ -15,6 +15,8 @@ public class BootstrapBinder extends AbstractBinder {
     @Override
     protected void configure() {
 
+        install(new MetricsBinder());
+
         bind(Cluster.Builder.class).to(Cluster.Builder.class);
 
     }
