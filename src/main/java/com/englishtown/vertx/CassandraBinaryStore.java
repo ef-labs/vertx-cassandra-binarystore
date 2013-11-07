@@ -166,7 +166,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        PoolingOptions poolingOptions = builder.poolingOptions();
+        PoolingOptions poolingOptions = new PoolingOptions();
 
         Integer core_connections_per_host_local = poolingConfig.getInteger("core_connections_per_host_local");
         Integer core_connections_per_host_remote = poolingConfig.getInteger("core_connections_per_host_remote");
@@ -201,6 +201,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         if (max_simultaneous_requests_remote != null) {
             poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE, max_simultaneous_requests_remote.intValue());
         }
+
+        builder.withPoolingOptions(poolingOptions);
 
     }
 
@@ -648,10 +650,10 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     }
 
-    public <T> void executeQuery(Query query, Message<T> message, Metrics.Context context, final FutureCallback<ResultSet> callback) {
+    public <T> void executeQuery(Statement statement, Message<T> message, Metrics.Context context, final FutureCallback<ResultSet> callback) {
 
         try {
-            final ResultSetFuture future = session.executeAsync(query);
+            final ResultSetFuture future = session.executeAsync(statement);
             Futures.addCallback(future, callback);
 
         } catch (Throwable e) {

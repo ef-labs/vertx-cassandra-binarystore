@@ -90,7 +90,7 @@ public class CassandraBinaryStoreTest {
         when(session.prepare(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.bind(anyVararg())).thenReturn(boundStatement);
         when(preparedStatement.setConsistencyLevel(any(ConsistencyLevel.class))).thenReturn(preparedStatement);
-        when(session.executeAsync(any(Query.class))).thenReturn(resultSetFuture);
+        when(session.executeAsync(any(Statement.class))).thenReturn(resultSetFuture);
 
         binaryStore = new CassandraBinaryStore(provider, registryProvider);
         binaryStore.setVertx(vertx);
@@ -291,9 +291,6 @@ public class CassandraBinaryStoreTest {
     public void testInitPoolingOptions() throws Exception {
 
         Cluster.Builder builder = mock(Cluster.Builder.class);
-        PoolingOptions poolingOptions = mock(PoolingOptions.class);
-
-        when(builder.poolingOptions()).thenReturn(poolingOptions);
 
         JsonObject config = new JsonObject()
                 .putObject("pooling", new JsonObject()
@@ -309,17 +306,22 @@ public class CassandraBinaryStoreTest {
 
         binaryStore.initPoolingOptions(builder, config);
 
-        verify(poolingOptions).setCoreConnectionsPerHost(eq(HostDistance.LOCAL), eq(1));
-        verify(poolingOptions).setCoreConnectionsPerHost(eq(HostDistance.REMOTE), eq(2));
+        ArgumentCaptor<PoolingOptions> optionsCaptor = ArgumentCaptor.forClass(PoolingOptions.class);
+        verify(builder).withPoolingOptions(optionsCaptor.capture());
+        PoolingOptions poolingOptions = optionsCaptor.getValue();
 
-        verify(poolingOptions).setMaxConnectionsPerHost(eq(HostDistance.LOCAL), eq(3));
-        verify(poolingOptions).setMaxConnectionsPerHost(eq(HostDistance.REMOTE), eq(4));
+        assertEquals(1, poolingOptions.getCoreConnectionsPerHost(HostDistance.LOCAL));
+        assertEquals(2, poolingOptions.getCoreConnectionsPerHost(HostDistance.REMOTE));
 
-        verify(poolingOptions).setMinSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.LOCAL), eq(5));
-        verify(poolingOptions).setMinSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.REMOTE), eq(6));
+        assertEquals(3, poolingOptions.getMaxConnectionsPerHost(HostDistance.LOCAL));
+        assertEquals(4, poolingOptions.getMaxConnectionsPerHost(HostDistance.REMOTE));
 
-        verify(poolingOptions).setMaxSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.LOCAL), eq(7));
-        verify(poolingOptions).setMaxSimultaneousRequestsPerConnectionThreshold(eq(HostDistance.REMOTE), eq(8));
+        assertEquals(5, poolingOptions.getMinSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL));
+        assertEquals(6, poolingOptions.getMinSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE));
+
+        assertEquals(7, poolingOptions.getMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL));
+        assertEquals(8, poolingOptions.getMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE));
+
     }
 
     @Test
@@ -327,8 +329,6 @@ public class CassandraBinaryStoreTest {
 
         Cluster.Builder builder = mock(Cluster.Builder.class);
         PoolingOptions poolingOptions = mock(PoolingOptions.class);
-
-        when(builder.poolingOptions()).thenReturn(poolingOptions);
 
         JsonObject config = new JsonObject()
                 .putObject("policies", new JsonObject()
@@ -348,8 +348,6 @@ public class CassandraBinaryStoreTest {
 
         Cluster.Builder builder = mock(Cluster.Builder.class);
         PoolingOptions poolingOptions = mock(PoolingOptions.class);
-
-        when(builder.poolingOptions()).thenReturn(poolingOptions);
 
         JsonObject config = new JsonObject()
                 .putObject("policies", new JsonObject()
