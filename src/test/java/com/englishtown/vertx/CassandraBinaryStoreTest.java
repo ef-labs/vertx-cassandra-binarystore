@@ -5,6 +5,10 @@ import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.englishtown.vertx.cassandra.CassandraSession;
+import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
+import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
+import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
+import com.englishtown.vertx.cassandra.binarystore.FileInfo;
 import com.google.common.util.concurrent.FutureCallback;
 import org.junit.Before;
 import org.junit.Test;
@@ -42,9 +46,11 @@ public class CassandraBinaryStoreTest {
     JsonObject jsonBody = new JsonObject();
 
     @Mock
-    Message<JsonObject> jsonMessage;
+    BinaryStoreStarter starter;
     @Mock
-    Metadata metadata;
+    BinaryStoreManager binaryStoreManager;
+    @Mock
+    Message<JsonObject> jsonMessage;
     @Mock
     CassandraSession session;
     @Mock
@@ -56,15 +62,17 @@ public class CassandraBinaryStoreTest {
     @Mock
     Logger logger;
     @Mock
-    PreparedStatement preparedStatement;
-    @Mock
-    BoundStatement boundStatement;
-    @Mock
     Future<Void> startedResult;
     @Mock
     Provider<MetricRegistry> registryProvider;
     @Captor
-    ArgumentCaptor<FutureCallback<ResultSet>> futureCallbackCaptor;
+    ArgumentCaptor<FileInfo> fileInfoCaptor;
+    @Captor
+    ArgumentCaptor<FutureCallback<Void>> voidCallbackCaptor;
+    @Captor
+    ArgumentCaptor<FutureCallback<FileInfo>> fileInfoCallbackCaptor;
+    @Captor
+    ArgumentCaptor<FutureCallback<ChunkInfo>> chunkInfoCallbackCaptor;
 
 
     @Before
@@ -72,17 +80,12 @@ public class CassandraBinaryStoreTest {
 
         when(jsonMessage.body()).thenReturn(jsonBody);
 
-        when(session.getMetadata()).thenReturn(metadata);
-
         when(container.config()).thenReturn(config);
         when(container.logger()).thenReturn(logger);
         when(vertx.eventBus()).thenReturn(eventBus);
 
-        when(session.prepare(anyString())).thenReturn(preparedStatement);
-        when(preparedStatement.bind(anyVararg())).thenReturn(boundStatement);
-        when(preparedStatement.setConsistencyLevel(any(ConsistencyLevel.class))).thenReturn(preparedStatement);
 
-        binaryStore = new CassandraBinaryStore(session, registryProvider);
+        binaryStore = new CassandraBinaryStore(starter, binaryStoreManager, session, registryProvider);
         binaryStore.setVertx(vertx);
         binaryStore.setContainer(container);
 
@@ -104,31 +107,31 @@ public class CassandraBinaryStoreTest {
         verify(session).close();
     }
 
-    @Test
-    public void testEnsureSchema() throws Exception {
-        // ensureSchema() is called  from start() during setUp(), just run verifications
-        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(session, times(3)).execute(captor.capture());
-        List<String> queries = captor.getAllValues();
-
-        assertEquals("CREATE KEYSPACE binarystore WITH replication = {'class':'SimpleStrategy', 'replication_factor':3};", queries.get(0));
-        assertEquals("CREATE TABLE binarystore.files (id uuid PRIMARY KEY,filename text,contentType text,chunkSize int,length bigint,uploadDate bigint,metadata text);", queries.get(1));
-        assertEquals("CREATE TABLE binarystore.chunks (files_id uuid,n int,data blob,PRIMARY KEY (files_id, n));", queries.get(2));
-    }
-
-    @Test
-    public void testInitPreparedStatements() throws Exception {
-        // initPreparedStatements() is called  from start() during setUp(), just run verifications
-        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(session, times(4)).prepare(captor.capture());
-        List<String> queries = captor.getAllValues();
-
-        assertEquals("INSERT INTO binarystore.chunks(files_id,n,data) VALUES (?,?,?);", queries.get(0));
-        assertEquals("INSERT INTO binarystore.files(id,length,chunkSize,uploadDate,filename,contentType,metadata) VALUES (?,?,?,?,?,?,?);", queries.get(1));
-        assertEquals("SELECT * FROM binarystore.files WHERE id=?;", queries.get(2));
-        assertEquals("SELECT data FROM binarystore.chunks WHERE files_id=? AND n=?;", queries.get(3));
-
-    }
+//    @Test
+//    public void testEnsureSchema() throws Exception {
+//        // ensureSchema() is called  from start() during setUp(), just run verifications
+//        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+//        verify(session, times(3)).execute(captor.capture());
+//        List<String> queries = captor.getAllValues();
+//
+//        assertEquals("CREATE KEYSPACE binarystore WITH replication = {'class':'SimpleStrategy', 'replication_factor':3};", queries.get(0));
+//        assertEquals("CREATE TABLE binarystore.files (id uuid PRIMARY KEY,filename text,contentType text,chunkSize int,length bigint,uploadDate bigint,metadata text);", queries.get(1));
+//        assertEquals("CREATE TABLE binarystore.chunks (files_id uuid,n int,data blob,PRIMARY KEY (files_id, n));", queries.get(2));
+//    }
+//
+//    @Test
+//    public void testInitPreparedStatements() throws Exception {
+//        // initPreparedStatements() is called  from start() during setUp(), just run verifications
+//        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+//        verify(session, times(4)).prepare(captor.capture());
+//        List<String> queries = captor.getAllValues();
+//
+//        assertEquals("INSERT INTO binarystore.chunks(files_id,n,data) VALUES (?,?,?);", queries.get(0));
+//        assertEquals("INSERT INTO binarystore.files(id,length,chunkSize,uploadDate,filename,contentType,metadata) VALUES (?,?,?,?,?,?,?);", queries.get(1));
+//        assertEquals("SELECT * FROM binarystore.files WHERE id=?;", queries.get(2));
+//        assertEquals("SELECT data FROM binarystore.chunks WHERE files_id=? AND n=?;", queries.get(3));
+//
+//    }
 
     @Test
     public void testHandle_Missing_Action() throws Exception {
@@ -207,69 +210,14 @@ public class CassandraBinaryStoreTest {
 
         binaryStore.saveFile(jsonMessage, jsonBody);
 
-        verify(session).executeAsync(any(Statement.class), futureCallbackCaptor.capture());
-        ResultSet rs = mock(ResultSet.class);
-        futureCallbackCaptor.getValue().onSuccess(rs);
+        verify(binaryStoreManager).storeFile(fileInfoCaptor.capture(), voidCallbackCaptor.capture());
+        voidCallbackCaptor.getValue().onSuccess(null);
 
         ArgumentCaptor<JsonObject> jsonCaptor = ArgumentCaptor.forClass(JsonObject.class);
         verify(jsonMessage).reply(jsonCaptor.capture());
 
         JsonObject reply = jsonCaptor.getValue();
         assertEquals("ok", reply.getString("status"));
-    }
-
-    @Test
-    public void testGetQueryConsistencyLevel() throws Exception {
-        JsonObject config = new JsonObject();
-        ConsistencyLevel consistency;
-
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertNull(consistency);
-
-        config.putString("consistency_level", "");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertNull(consistency);
-
-        try {
-            config.putString("consistency_level", "invalid value");
-            binaryStore.getQueryConsistencyLevel(config);
-            fail();
-        } catch (IllegalArgumentException e) {
-            // Expected exception
-        }
-
-        config.putString("consistency_level", "one");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.ONE, consistency);
-
-        config.putString("consistency_level", "two");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.TWO, consistency);
-
-        config.putString("consistency_level", "three");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.THREE, consistency);
-
-        config.putString("consistency_level", "any");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.ANY, consistency);
-
-        config.putString("consistency_level", "quorum");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.QUORUM, consistency);
-
-        config.putString("consistency_level", "all");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.ALL, consistency);
-
-        config.putString("consistency_level", "local_quorum");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.LOCAL_QUORUM, consistency);
-
-        config.putString("consistency_level", "each_quorum");
-        consistency = binaryStore.getQueryConsistencyLevel(config);
-        assertEquals(ConsistencyLevel.EACH_QUORUM, consistency);
-
     }
 
     @Test

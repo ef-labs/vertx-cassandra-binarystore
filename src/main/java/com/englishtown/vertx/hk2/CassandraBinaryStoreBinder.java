@@ -1,7 +1,15 @@
 package com.englishtown.vertx.hk2;
 
 import com.datastax.driver.core.Cluster;
+import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
+import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
+import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStatements;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreManager;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreStatements;
+import com.englishtown.vertx.cassandra.hk2.CassandraSessionBinder;
 import org.glassfish.hk2.utilities.binding.AbstractBinder;
+
+import javax.inject.Singleton;
 
 /**
  *
@@ -15,9 +23,11 @@ public class CassandraBinaryStoreBinder extends AbstractBinder {
     @Override
     protected void configure() {
 
-        install(new MetricsBinder());
+        install(new MetricsBinder(), new CassandraSessionBinder());
 
-        bind(Cluster.Builder.class).to(Cluster.Builder.class);
+        bind(BinaryStoreStarter.class).to(BinaryStoreStarter.class);
+        bind(DefaultBinaryStoreManager.class).to(BinaryStoreManager.class).in(Singleton.class);
+        bind(DefaultBinaryStoreStatements.class).to(BinaryStoreStatements.class).in(Singleton.class);
 
     }
 }

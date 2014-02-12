@@ -15,7 +15,7 @@ public class BootstrapBinder extends AbstractBinder {
     @Override
     protected void configure() {
 
-        install(new CassandraBinaryStoreBinder(), new CassandraSessionBinder());
+        install(new CassandraBinaryStoreBinder());
 
     }
 }

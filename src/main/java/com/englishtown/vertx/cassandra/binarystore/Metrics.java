@@ -1,4 +1,4 @@
-package com.englishtown.vertx;
+package com.englishtown.vertx.cassandra.binarystore;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.MetricRegistry;

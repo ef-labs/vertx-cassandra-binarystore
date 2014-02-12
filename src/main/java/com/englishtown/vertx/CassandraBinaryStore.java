@@ -26,21 +26,19 @@ package com.englishtown.vertx;
 import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.SharedMetricRegistries;
-import com.datastax.driver.core.*;
-import com.datastax.driver.core.exceptions.AlreadyExistsException;
-import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
-import com.datastax.driver.core.policies.LoadBalancingPolicy;
-import com.datastax.driver.core.querybuilder.QueryBuilder;
+import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.Statement;
 import com.englishtown.vertx.cassandra.CassandraSession;
+import com.englishtown.vertx.cassandra.binarystore.*;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultChunkInfo;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
 import com.englishtown.vertx.hk2.MetricsBinder;
 import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.EventBus;
 import org.vertx.java.core.eventbus.Message;
-import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Verticle;
@@ -48,13 +46,10 @@ import org.vertx.java.platform.Verticle;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.io.UnsupportedEncodingException;
-import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-
-import static com.datastax.driver.core.querybuilder.QueryBuilder.bindMarker;
-import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 
 /**
  * An EventBus module to save binary files in Cassandra
@@ -65,6 +60,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     private final MetricRegistry registry;
     private final Metrics fileMetrics;
     private final Metrics chunkMetrics;
+    private final BinaryStoreManager binaryStoreManager;
 
     protected EventBus eb;
     protected Logger logger;
@@ -72,16 +68,15 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     protected String keyspace;
 
     protected CassandraSession session;
-    protected PreparedStatement insertChunk;
-    protected PreparedStatement insertFile;
-    protected PreparedStatement getChunk;
-    protected PreparedStatement getFile;
+    private final BinaryStoreStarter starter;
     private String address;
     private JsonObject config;
     private JmxReporter reporter;
 
     @Inject
-    public CassandraBinaryStore(CassandraSession session, Provider<MetricRegistry> registryProvider) {
+    public CassandraBinaryStore(BinaryStoreStarter starter, BinaryStoreManager binaryStoreManager, CassandraSession session, Provider<MetricRegistry> registryProvider) {
+        this.starter = starter;
+        this.binaryStoreManager = binaryStoreManager;
         this.session = session;
         MetricRegistry registry = registryProvider.get();
         if (registry == null) {
@@ -97,14 +92,10 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         eb = vertx.eventBus();
         logger = container.logger();
 
+        starter.run();
+
         config = container.config();
         address = config.getString("address", DEFAULT_ADDRESS);
-
-        // Get keyspace, default to binarystore
-        keyspace = config.getString("keyspace", "binarystore");
-
-        ensureSchema();
-        initPreparedStatements(config);
 
         // Main Message<JsonObject> handler that inspects an "action" field
         eb.registerHandler(address, this);
@@ -138,144 +129,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         if (reporter != null) {
             reporter.stop();
         }
-    }
-
-    public void ensureSchema() {
-
-        Metadata metadata = session.getMetadata();
-
-        // Ensure the keyspace exists
-        KeyspaceMetadata kmd = metadata.getKeyspace(keyspace);
-        if (kmd == null) {
-            try {
-                session.execute("CREATE KEYSPACE " + keyspace + " WITH replication " +
-                        "= {'class':'SimpleStrategy', 'replication_factor':3};");
-            } catch (AlreadyExistsException e) {
-                // OK if it already exists
-            }
-        }
-
-        if (kmd == null || kmd.getTable("files") == null) {
-            try {
-                session.execute(
-                        "CREATE TABLE " + keyspace + ".files (" +
-                                "id uuid PRIMARY KEY," +
-                                "filename text," +
-                                "contentType text," +
-                                "chunkSize int," +
-                                "length bigint," +
-                                "uploadDate bigint," +
-                                "metadata text" +
-                                ");");
-
-            } catch (AlreadyExistsException e) {
-                // OK if it already exists
-            }
-        }
-
-        if (kmd == null || kmd.getTable("chunks") == null) {
-            try {
-                session.execute(
-                        "CREATE TABLE " + keyspace + ".chunks (" +
-                                "files_id uuid," +
-                                "n int," +
-                                "data blob," +
-                                "PRIMARY KEY (files_id, n)" +
-                                ");");
-
-            } catch (AlreadyExistsException e) {
-                // OK if it already exists
-            }
-        }
-
-    }
-
-    public ConsistencyLevel getQueryConsistencyLevel(JsonObject config) {
-        String consistency = config.getString("consistency_level");
-
-        if (consistency == null || consistency.isEmpty()) {
-            return null;
-        }
-
-        if (consistency.equalsIgnoreCase("ANY")) {
-            return ConsistencyLevel.ANY;
-        }
-        if (consistency.equalsIgnoreCase("ONE")) {
-            return ConsistencyLevel.ONE;
-        }
-        if (consistency.equalsIgnoreCase("TWO")) {
-            return ConsistencyLevel.TWO;
-        }
-        if (consistency.equalsIgnoreCase("THREE")) {
-            return ConsistencyLevel.THREE;
-        }
-        if (consistency.equalsIgnoreCase("QUORUM")) {
-            return ConsistencyLevel.QUORUM;
-        }
-        if (consistency.equalsIgnoreCase("ALL")) {
-            return ConsistencyLevel.ALL;
-        }
-        if (consistency.equalsIgnoreCase("LOCAL_QUORUM")) {
-            return ConsistencyLevel.LOCAL_QUORUM;
-        }
-        if (consistency.equalsIgnoreCase("EACH_QUORUM")) {
-            return ConsistencyLevel.EACH_QUORUM;
-        }
-
-        throw new IllegalArgumentException("'" + consistency + "' is not a valid consistency level.");
-    }
-
-    public void initPreparedStatements(JsonObject config) {
-
-        String query = QueryBuilder
-                .insertInto(keyspace, "chunks")
-                .value("files_id", bindMarker())
-                .value("n", bindMarker())
-                .value("data", bindMarker())
-                .getQueryString();
-
-        this.insertChunk = session.prepare(query);
-
-        query = QueryBuilder
-                .insertInto(keyspace, "files")
-                .value("id", bindMarker())
-                .value("length", bindMarker())
-                .value("chunkSize", bindMarker())
-                .value("uploadDate", bindMarker())
-                .value("filename", bindMarker())
-                .value("contentType", bindMarker())
-                .value("metadata", bindMarker())
-                .getQueryString();
-
-        this.insertFile = session.prepare(query);
-
-        query = QueryBuilder
-                .select()
-                .all()
-                .from(keyspace, "files")
-                .where(eq("id", bindMarker()))
-                .getQueryString();
-
-        this.getFile = session.prepare(query);
-
-        query = QueryBuilder
-                .select("data")
-                .from(keyspace, "chunks")
-                .where(eq("files_id", bindMarker()))
-                .and(eq("n", bindMarker()))
-                .getQueryString();
-
-        this.getChunk = session.prepare(query);
-
-        // Get query consistency level
-        ConsistencyLevel consistency = getQueryConsistencyLevel(config);
-        if (consistency != null) {
-            insertChunk.setConsistencyLevel(consistency);
-            insertFile.setConsistencyLevel(consistency);
-            getFile.setConsistencyLevel(consistency);
-            getChunk.setConsistencyLevel(consistency);
-        }
-
     }
 
     @Override
@@ -333,14 +186,26 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         String filename = jsonObject.getString("filename");
         String contentType = jsonObject.getString("contentType");
         JsonObject metadata = jsonObject.getObject("metadata");
-        String metadataStr = metadata == null ? null : metadata.encode();
-        // TODO Store metadata as a map?
 
-        BoundStatement query = insertFile.bind(id, length, chunkSize, uploadDate, filename, contentType, metadataStr);
+        DefaultFileInfo fileInfo = new DefaultFileInfo()
+                .setId(id)
+                .setLength(length)
+                .setChunkSize(chunkSize)
+                .setUploadDate(uploadDate)
+                .setFileName(filename)
+                .setContentType(contentType);
 
-        executeQuery(query, message, context, new FutureCallback<ResultSet>() {
+        if (metadata != null) {
+            Map<String, String> map = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> entry : metadata.toMap().entrySet()) {
+                map.put(entry.getKey(), (entry.getValue() == null ? null : String.valueOf(entry.getValue())));
+            }
+            fileInfo.setMetadata(map);
+        }
+
+        binaryStoreManager.storeFile(fileInfo, new FutureCallback<Void>() {
             @Override
-            public void onSuccess(ResultSet result) {
+            public void onSuccess(Void result) {
                 sendOK(message, context);
             }
 
@@ -410,11 +275,14 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        BoundStatement insert = insertChunk.bind(id, n, ByteBuffer.wrap(data));
+        ChunkInfo chunkInfo = new DefaultChunkInfo()
+                .setId(id)
+                .setNum(n)
+                .setData(data);
 
-        executeQuery(insert, message, context, new FutureCallback<ResultSet>() {
+        binaryStoreManager.storeChunk(chunkInfo, new FutureCallback<Void>() {
             @Override
-            public void onSuccess(ResultSet result) {
+            public void onSuccess(Void result) {
                 sendOK(message, context);
             }
 
@@ -434,27 +302,27 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        BoundStatement query = getFile.bind(id);
-
-        executeQuery(query, message, context, new FutureCallback<ResultSet>() {
+        binaryStoreManager.loadFile(id, new FutureCallback<FileInfo>() {
             @Override
-            public void onSuccess(ResultSet result) {
-                Row row = result.one();
-                if (row == null) {
+            public void onSuccess(FileInfo result) {
+                if (result == null) {
                     sendError(message, "File " + id.toString() + " does not exist", 404, context);
                     return;
                 }
 
                 JsonObject fileInfo = new JsonObject()
-                        .putString("filename", row.getString("filename"))
-                        .putString("contentType", row.getString("contentType"))
-                        .putNumber("length", row.getLong("length"))
-                        .putNumber("chunkSize", row.getInt("chunkSize"))
-                        .putNumber("uploadDate", row.getLong("uploadDate"));
+                        .putString("filename", result.getFileName())
+                        .putString("contentType", result.getContentType())
+                        .putNumber("length", result.getLength())
+                        .putNumber("chunkSize", result.getChunkSize())
+                        .putNumber("uploadDate", result.getUploadDate());
 
-                String metadata = row.getString("metadata");
-                if (metadata != null) {
-                    fileInfo.putObject("metadata", new JsonObject(metadata));
+                if (result.getMetadata() != null) {
+                    JsonObject metadata = new JsonObject();
+                    for (Map.Entry<String, String> entry : result.getMetadata().entrySet()) {
+                        metadata.putString(entry.getKey(), entry.getValue());
+                    }
+                    fileInfo.putObject("metadata", metadata);
                 }
 
                 // Send file info
@@ -479,20 +347,13 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        BoundStatement query = getChunk.bind(id, n);
-
-        executeQuery(query, message, context, new FutureCallback<ResultSet>() {
+        binaryStoreManager.loadChunk(id, n, new FutureCallback<ChunkInfo>() {
             @Override
-            public void onSuccess(ResultSet result) {
-                Row row = result.one();
-                if (row == null) {
+            public void onSuccess(ChunkInfo result) {
+                if (result == null) {
                     message.reply(new byte[0]);
                     return;
                 }
-
-                ByteBuffer bb = row.getBytes("data");
-                byte[] data = new byte[bb.remaining()];
-                bb.get(data);
 
                 boolean reply = jsonObject.getBoolean("reply", false);
                 Handler<Message<JsonObject>> replyHandler = null;
@@ -510,7 +371,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
                 // TODO: Change to reply with a Buffer instead of a byte[]?
                 context.stop();
-                message.reply(data, replyHandler);
+                message.reply(result.getData(), replyHandler);
             }
 
             @Override
