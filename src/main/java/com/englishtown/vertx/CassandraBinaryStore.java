@@ -31,6 +31,7 @@ import com.datastax.driver.core.exceptions.AlreadyExistsException;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
+import com.englishtown.vertx.cassandra.CassandraSession;
 import com.englishtown.vertx.hk2.MetricsBinder;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
@@ -61,7 +62,6 @@ import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 public class CassandraBinaryStore extends Verticle implements Handler<Message<JsonObject>> {
 
     public static final String DEFAULT_ADDRESS = "et.cassandra.binarystore";
-    private final Provider<Cluster.Builder> clusterBuilderProvider;
     private final MetricRegistry registry;
     private final Metrics fileMetrics;
     private final Metrics chunkMetrics;
@@ -71,8 +71,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     protected String keyspace;
 
-    protected Cluster cluster;
-    protected Session session;
+    protected CassandraSession session;
     protected PreparedStatement insertChunk;
     protected PreparedStatement insertFile;
     protected PreparedStatement getChunk;
@@ -82,12 +81,8 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     private JmxReporter reporter;
 
     @Inject
-    public CassandraBinaryStore(Provider<Cluster.Builder> clusterBuilderProvider, Provider<MetricRegistry> registryProvider) {
-        if (clusterBuilderProvider == null) {
-            throw new IllegalArgumentException("clusterBuilderProvider is required");
-        }
-        this.clusterBuilderProvider = clusterBuilderProvider;
-
+    public CassandraBinaryStore(CassandraSession session, Provider<MetricRegistry> registryProvider) {
+        this.session = session;
         MetricRegistry registry = registryProvider.get();
         if (registry == null) {
             registry = SharedMetricRegistries.getOrCreate(MetricsBinder.SHARED_REGISTRY_NAME);
@@ -107,11 +102,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
         // Get keyspace, default to binarystore
         keyspace = config.getString("keyspace", "binarystore");
-
-        // Build cluster and session
-        Cluster.Builder builder = getBuilder(config);
-        cluster = builder.build();
-        session = cluster.connect();
 
         ensureSchema();
         initPreparedStatements(config);
@@ -136,133 +126,14 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         startedResult.setResult(null);
     }
 
-    public Cluster.Builder getBuilder(JsonObject config) {
-
-        // Create cluster builder
-        Cluster.Builder builder = clusterBuilderProvider.get();
-
-        // Get array of IPs, default to localhost
-        JsonArray ips = config.getArray("ips");
-        if (ips == null || ips.size() == 0) {
-            ips = new JsonArray().addString("127.0.0.1");
-        }
-
-        // Add cassandra cluster contact points
-        for (int i = 0; i < ips.size(); i++) {
-            builder.addContactPoint(ips.<String>get(i));
-        }
-
-        initPoolingOptions(builder, config);
-        initPolicies(builder, config);
-
-        return builder;
-    }
-
-    public void initPoolingOptions(Cluster.Builder builder, JsonObject config) {
-
-        JsonObject poolingConfig = config.getObject("pooling");
-
-        if (poolingConfig == null) {
-            return;
-        }
-
-        PoolingOptions poolingOptions = new PoolingOptions();
-
-        Integer core_connections_per_host_local = poolingConfig.getInteger("core_connections_per_host_local");
-        Integer core_connections_per_host_remote = poolingConfig.getInteger("core_connections_per_host_remote");
-        Integer max_connections_per_host_local = poolingConfig.getInteger("max_connections_per_host_local");
-        Integer max_connections_per_host_remote = poolingConfig.getInteger("max_connections_per_host_remote");
-        Integer min_simultaneous_requests_local = poolingConfig.getInteger("min_simultaneous_requests_local");
-        Integer min_simultaneous_requests_remote = poolingConfig.getInteger("min_simultaneous_requests_remote");
-        Integer max_simultaneous_requests_local = poolingConfig.getInteger("max_simultaneous_requests_local");
-        Integer max_simultaneous_requests_remote = poolingConfig.getInteger("max_simultaneous_requests_remote");
-
-        if (core_connections_per_host_local != null) {
-            poolingOptions.setCoreConnectionsPerHost(HostDistance.LOCAL, core_connections_per_host_local.intValue());
-        }
-        if (core_connections_per_host_remote != null) {
-            poolingOptions.setCoreConnectionsPerHost(HostDistance.REMOTE, core_connections_per_host_remote.intValue());
-        }
-        if (max_connections_per_host_local != null) {
-            poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, max_connections_per_host_local.intValue());
-        }
-        if (max_connections_per_host_remote != null) {
-            poolingOptions.setMaxConnectionsPerHost(HostDistance.REMOTE, max_connections_per_host_remote.intValue());
-        }
-        if (min_simultaneous_requests_local != null) {
-            poolingOptions.setMinSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL, min_simultaneous_requests_local.intValue());
-        }
-        if (min_simultaneous_requests_remote != null) {
-            poolingOptions.setMinSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE, min_simultaneous_requests_remote.intValue());
-        }
-        if (max_simultaneous_requests_local != null) {
-            poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL, max_simultaneous_requests_local.intValue());
-        }
-        if (max_simultaneous_requests_remote != null) {
-            poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE, max_simultaneous_requests_remote.intValue());
-        }
-
-        builder.withPoolingOptions(poolingOptions);
-
-    }
-
-    public void initPolicies(Cluster.Builder builder, JsonObject config) {
-
-        JsonObject policyConfig = config.getObject("policies");
-
-        if (policyConfig == null) {
-            return;
-        }
-
-        JsonObject loadBalancing = policyConfig.getObject("load_balancing");
-        if (loadBalancing != null) {
-            String name = loadBalancing.getString("name");
-
-            if (name == null || name.isEmpty()) {
-                throw new IllegalArgumentException("A load balancing policy must have a class name field");
-
-            } else if ("DCAwareRoundRobinPolicy".equalsIgnoreCase(name)
-                    || "com.datastax.driver.core.policies.DCAwareRoundRobinPolicy".equalsIgnoreCase(name)) {
-
-                String localDc = loadBalancing.getString("local_dc");
-                int usedHostsPerRemoteDc = loadBalancing.getInteger("used_hosts_per_remote_dc", 0);
-
-                if (localDc == null || localDc.isEmpty()) {
-                    throw new IllegalArgumentException("A DCAwareRoundRobinPolicy requires a local_dc in configuration.");
-                }
-
-                builder.withLoadBalancingPolicy(new DCAwareRoundRobinPolicy(localDc, usedHostsPerRemoteDc));
-
-            } else {
-
-                Class<?> clazz;
-                try {
-                    clazz = Thread.currentThread().getContextClassLoader().loadClass(name);
-                } catch (ClassNotFoundException e) {
-                    throw new RuntimeException(e);
-                }
-                if (LoadBalancingPolicy.class.isAssignableFrom(clazz)) {
-                    try {
-                        builder.withLoadBalancingPolicy((LoadBalancingPolicy) clazz.newInstance());
-                    } catch (IllegalAccessException | InstantiationException e) {
-                        throw new RuntimeException(e);
-                    }
-                } else {
-                    throw new IllegalArgumentException("Class " + name + " does not implement LoadBalancingPolicy");
-                }
-
-            }
-        }
-
-    }
-
     @Override
     public void stop() {
         if (session != null) {
-            session.shutdown();
-        }
-        if (cluster != null) {
-            cluster.shutdown();
+            try {
+                session.close();
+            } catch (Exception e) {
+                logger.error("Error closing CassandraSession", e);
+            }
         }
         if (reporter != null) {
             reporter.stop();
@@ -271,7 +142,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     public void ensureSchema() {
 
-        Metadata metadata = cluster.getMetadata();
+        Metadata metadata = session.getMetadata();
 
         // Ensure the keyspace exists
         KeyspaceMetadata kmd = metadata.getKeyspace(keyspace);
@@ -653,8 +524,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     public <T> void executeQuery(Statement statement, Message<T> message, Metrics.Context context, final FutureCallback<ResultSet> callback) {
 
         try {
-            final ResultSetFuture future = session.executeAsync(statement);
-            Futures.addCallback(future, callback);
+            session.executeAsync(statement, callback);
 
         } catch (Throwable e) {
             sendError(message, "Error executing async cassandra query", e, context);

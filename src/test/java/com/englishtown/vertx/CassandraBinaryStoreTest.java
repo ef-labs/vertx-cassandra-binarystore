@@ -4,10 +4,13 @@ import com.codahale.metrics.MetricRegistry;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.RoundRobinPolicy;
+import com.englishtown.vertx.cassandra.CassandraSession;
+import com.google.common.util.concurrent.FutureCallback;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 import org.vertx.java.core.Future;
@@ -41,15 +44,9 @@ public class CassandraBinaryStoreTest {
     @Mock
     Message<JsonObject> jsonMessage;
     @Mock
-    Session session;
-    @Mock
-    Cluster cluster;
-    @Mock
     Metadata metadata;
     @Mock
-    Cluster.Builder builder;
-    @Mock
-    Provider<Cluster.Builder> provider;
+    CassandraSession session;
     @Mock
     Vertx vertx;
     @Mock
@@ -63,11 +60,11 @@ public class CassandraBinaryStoreTest {
     @Mock
     BoundStatement boundStatement;
     @Mock
-    ResultSetFuture resultSetFuture;
-    @Mock
     Future<Void> startedResult;
     @Mock
     Provider<MetricRegistry> registryProvider;
+    @Captor
+    ArgumentCaptor<FutureCallback<ResultSet>> futureCallbackCaptor;
 
 
     @Before
@@ -75,13 +72,7 @@ public class CassandraBinaryStoreTest {
 
         when(jsonMessage.body()).thenReturn(jsonBody);
 
-        when(provider.get()).thenReturn(builder);
-
-        when(builder.addContactPoint(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(cluster);
-
-        when(cluster.connect()).thenReturn(session);
-        when(cluster.getMetadata()).thenReturn(metadata);
+        when(session.getMetadata()).thenReturn(metadata);
 
         when(container.config()).thenReturn(config);
         when(container.logger()).thenReturn(logger);
@@ -90,9 +81,8 @@ public class CassandraBinaryStoreTest {
         when(session.prepare(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.bind(anyVararg())).thenReturn(boundStatement);
         when(preparedStatement.setConsistencyLevel(any(ConsistencyLevel.class))).thenReturn(preparedStatement);
-        when(session.executeAsync(any(Statement.class))).thenReturn(resultSetFuture);
 
-        binaryStore = new CassandraBinaryStore(provider, registryProvider);
+        binaryStore = new CassandraBinaryStore(session, registryProvider);
         binaryStore.setVertx(vertx);
         binaryStore.setContainer(container);
 
@@ -103,11 +93,6 @@ public class CassandraBinaryStoreTest {
     @SuppressWarnings("unchecked")
     public void testStart() throws Exception {
         // Start is called during setUp(), just run verifications
-        verify(provider).get();
-        verify(builder).addContactPoint("127.0.0.1");
-        verify(builder).build();
-        verify(cluster).connect();
-
         verify(eventBus).registerHandler(eq(CassandraBinaryStore.DEFAULT_ADDRESS), eq(binaryStore));
         verify(eventBus).registerHandler(eq(CassandraBinaryStore.DEFAULT_ADDRESS + "/saveChunk"), any(Handler.class));
 
@@ -116,7 +101,7 @@ public class CassandraBinaryStoreTest {
     @Test
     public void testStop() throws Exception {
         binaryStore.stop();
-        verify(cluster).shutdown();
+        verify(session).close();
     }
 
     @Test
@@ -222,9 +207,9 @@ public class CassandraBinaryStoreTest {
 
         binaryStore.saveFile(jsonMessage, jsonBody);
 
-        ArgumentCaptor<Runnable> captor = ArgumentCaptor.forClass(Runnable.class);
-        verify(resultSetFuture).addListener(captor.capture(), any(Executor.class));
-        captor.getValue().run();
+        verify(session).executeAsync(any(Statement.class), futureCallbackCaptor.capture());
+        ResultSet rs = mock(ResultSet.class);
+        futureCallbackCaptor.getValue().onSuccess(rs);
 
         ArgumentCaptor<JsonObject> jsonCaptor = ArgumentCaptor.forClass(JsonObject.class);
         verify(jsonMessage).reply(jsonCaptor.capture());
@@ -284,80 +269,6 @@ public class CassandraBinaryStoreTest {
         config.putString("consistency_level", "each_quorum");
         consistency = binaryStore.getQueryConsistencyLevel(config);
         assertEquals(ConsistencyLevel.EACH_QUORUM, consistency);
-
-    }
-
-    @Test
-    public void testInitPoolingOptions() throws Exception {
-
-        Cluster.Builder builder = mock(Cluster.Builder.class);
-
-        JsonObject config = new JsonObject()
-                .putObject("pooling", new JsonObject()
-                        .putNumber("core_connections_per_host_local", 1)
-                        .putNumber("core_connections_per_host_remote", 2)
-                        .putNumber("max_connections_per_host_local", 3)
-                        .putNumber("max_connections_per_host_remote", 4)
-                        .putNumber("min_simultaneous_requests_local", 5)
-                        .putNumber("min_simultaneous_requests_remote", 6)
-                        .putNumber("max_simultaneous_requests_local", 7)
-                        .putNumber("max_simultaneous_requests_remote", 8)
-                );
-
-        binaryStore.initPoolingOptions(builder, config);
-
-        ArgumentCaptor<PoolingOptions> optionsCaptor = ArgumentCaptor.forClass(PoolingOptions.class);
-        verify(builder).withPoolingOptions(optionsCaptor.capture());
-        PoolingOptions poolingOptions = optionsCaptor.getValue();
-
-        assertEquals(1, poolingOptions.getCoreConnectionsPerHost(HostDistance.LOCAL));
-        assertEquals(2, poolingOptions.getCoreConnectionsPerHost(HostDistance.REMOTE));
-
-        assertEquals(3, poolingOptions.getMaxConnectionsPerHost(HostDistance.LOCAL));
-        assertEquals(4, poolingOptions.getMaxConnectionsPerHost(HostDistance.REMOTE));
-
-        assertEquals(5, poolingOptions.getMinSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL));
-        assertEquals(6, poolingOptions.getMinSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE));
-
-        assertEquals(7, poolingOptions.getMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL));
-        assertEquals(8, poolingOptions.getMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE));
-
-    }
-
-    @Test
-    public void testInitPolicies_DCAwareRoundRobinPolicy() throws Exception {
-
-        Cluster.Builder builder = mock(Cluster.Builder.class);
-        PoolingOptions poolingOptions = mock(PoolingOptions.class);
-
-        JsonObject config = new JsonObject()
-                .putObject("policies", new JsonObject()
-                        .putObject("load_balancing", new JsonObject()
-                                .putString("name", "DCAwareRoundRobinPolicy")
-                                .putString("local_dc", "datacenter1")
-                        )
-                );
-
-        binaryStore.initPolicies(builder, config);
-        verify(builder).withLoadBalancingPolicy(any(DCAwareRoundRobinPolicy.class));
-
-    }
-
-    @Test
-    public void testInitPolicies_RoundRobinPolicy() throws Exception {
-
-        Cluster.Builder builder = mock(Cluster.Builder.class);
-        PoolingOptions poolingOptions = mock(PoolingOptions.class);
-
-        JsonObject config = new JsonObject()
-                .putObject("policies", new JsonObject()
-                        .putObject("load_balancing", new JsonObject()
-                                .putString("name", "com.datastax.driver.core.policies.RoundRobinPolicy")
-                        )
-                );
-
-        binaryStore.initPolicies(builder, config);
-        verify(builder).withLoadBalancingPolicy(any(RoundRobinPolicy.class));
 
     }
 
