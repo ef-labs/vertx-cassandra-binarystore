@@ -1,9 +1,6 @@
 package com.englishtown.vertx;
 
 import com.codahale.metrics.MetricRegistry;
-import com.datastax.driver.core.*;
-import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
-import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.englishtown.vertx.cassandra.CassandraSession;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
@@ -27,12 +24,9 @@ import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Container;
 
 import javax.inject.Provider;
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Executor;
 
-import static org.junit.Assert.*;
-import static org.mockito.Matchers.anyString;
+import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.*;
 
 /**

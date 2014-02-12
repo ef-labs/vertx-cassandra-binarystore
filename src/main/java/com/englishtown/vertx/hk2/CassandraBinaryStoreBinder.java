@@ -1,6 +1,5 @@
 package com.englishtown.vertx.hk2;
 
-import com.datastax.driver.core.Cluster;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStatements;

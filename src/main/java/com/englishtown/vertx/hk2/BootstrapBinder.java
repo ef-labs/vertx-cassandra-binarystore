@@ -1,6 +1,5 @@
 package com.englishtown.vertx.hk2;
 
-import com.englishtown.vertx.cassandra.hk2.CassandraSessionBinder;
 import org.glassfish.hk2.utilities.binding.AbstractBinder;
 
 /**
