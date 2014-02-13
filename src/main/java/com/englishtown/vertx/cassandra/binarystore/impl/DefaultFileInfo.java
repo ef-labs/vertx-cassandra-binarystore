@@ -64,6 +64,15 @@ public class DefaultFileInfo implements FileInfo {
         return chunkSize;
     }
 
+    @Override
+    public int getChunkCount() {
+        if (getChunkSize() <= 0) {
+            return 0;
+        }
+        double count = (double) getLength() / getChunkSize();
+        return (int) Math.ceil(count);
+    }
+
     public DefaultFileInfo setChunkSize(int chunkSize) {
         this.chunkSize = chunkSize;
         return this;

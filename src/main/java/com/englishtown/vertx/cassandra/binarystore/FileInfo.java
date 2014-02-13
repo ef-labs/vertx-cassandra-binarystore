@@ -18,6 +18,8 @@ public interface FileInfo {
 
     int getChunkSize();
 
+    int getChunkCount();
+
     long getUploadDate();
 
     Map<String, String> getMetadata();
