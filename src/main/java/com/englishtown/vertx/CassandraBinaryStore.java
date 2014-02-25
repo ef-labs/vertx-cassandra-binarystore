@@ -34,6 +34,7 @@ import com.englishtown.vertx.cassandra.binarystore.impl.DefaultChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
 import com.englishtown.vertx.hk2.MetricsBinder;
 import com.google.common.util.concurrent.FutureCallback;
+import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
@@ -89,10 +90,25 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     @Override
     public void start(final Future<Void> startedResult) {
-        eb = vertx.eventBus();
+
         logger = container.logger();
 
-        starter.run();
+        starter.run(new Handler<AsyncResult<Void>>() {
+            @Override
+            public void handle(AsyncResult<Void> event) {
+                if (event.succeeded()) {
+                    init(startedResult);
+                } else {
+                    startedResult.setFailure(event.cause());
+                }
+            }
+        });
+
+    }
+
+    private void init(final Future<Void> startedResult) {
+
+        eb = vertx.eventBus();
 
         config = container.config();
         address = config.getString("address", DEFAULT_ADDRESS);
@@ -115,6 +131,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         reporter = com.englishtown.vertx.metrics.Utils.create(this, registry, values, config);
 
         startedResult.setResult(null);
+
     }
 
     @Override

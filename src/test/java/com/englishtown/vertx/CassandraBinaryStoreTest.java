@@ -14,6 +14,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
+import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.Vertx;
@@ -59,6 +60,8 @@ public class CassandraBinaryStoreTest {
     Future<Void> startedResult;
     @Mock
     Provider<MetricRegistry> registryProvider;
+    @Mock
+    AsyncResult<Void> voidAsyncResult;
     @Captor
     ArgumentCaptor<FileInfo> fileInfoCaptor;
     @Captor
@@ -67,6 +70,8 @@ public class CassandraBinaryStoreTest {
     ArgumentCaptor<FutureCallback<FileInfo>> fileInfoCallbackCaptor;
     @Captor
     ArgumentCaptor<FutureCallback<ChunkInfo>> chunkInfoCallbackCaptor;
+    @Captor
+    ArgumentCaptor<Handler<AsyncResult<Void>>> asyncResultHandlerCaptor;
 
 
     @Before
@@ -90,6 +95,10 @@ public class CassandraBinaryStoreTest {
     @SuppressWarnings("unchecked")
     public void testStart() throws Exception {
         // Start is called during setUp(), just run verifications
+        verify(starter).run(asyncResultHandlerCaptor.capture());
+
+        when(voidAsyncResult.succeeded()).thenReturn(true);
+        asyncResultHandlerCaptor.getValue().handle(voidAsyncResult);
         verify(eventBus).registerHandler(eq(CassandraBinaryStore.DEFAULT_ADDRESS), eq(binaryStore));
         verify(eventBus).registerHandler(eq(CassandraBinaryStore.DEFAULT_ADDRESS + "/saveChunk"), any(Handler.class));
 

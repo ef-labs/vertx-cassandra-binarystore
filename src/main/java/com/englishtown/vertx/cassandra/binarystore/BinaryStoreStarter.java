@@ -7,6 +7,9 @@ import com.datastax.driver.core.exceptions.AlreadyExistsException;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.englishtown.vertx.cassandra.CassandraConfigurator;
 import com.englishtown.vertx.cassandra.CassandraSession;
+import org.vertx.java.core.AsyncResult;
+import org.vertx.java.core.Handler;
+import org.vertx.java.core.impl.DefaultFutureResult;
 import org.vertx.java.platform.Container;
 
 import javax.inject.Inject;
@@ -32,7 +35,7 @@ public class BinaryStoreStarter {
         this.container = container;
     }
 
-    public void run() {
+    public void run(Handler<AsyncResult<Void>> done) {
 
         // Get keyspace, default to binarystore
         String keyspace = container.config().getString("keyspace", "binarystore");
@@ -41,6 +44,8 @@ public class BinaryStoreStarter {
         ensureSchema(keyspace);
         initPreparedStatements(keyspace);
 
+        // TODO: Make start async
+        done.handle(new DefaultFutureResult<>((Void) null));
     }
 
     public void ensureSchema(String keyspace) {
