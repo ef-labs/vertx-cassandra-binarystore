@@ -59,10 +59,10 @@ public class BinaryStoreWriterIntegrationTest extends TestVerticle {
                             assertNotNull(result);
                             assertNotNull(result.getId());
                             assertEquals(name, result.getFileName());
-                            assertEquals(DefaultBinaryStoreWriter.DEFAULT_CHUNK_SIZE, result.getChunkSize());
                             assertEquals(length, result.getLength());
                             assertEquals(chunkSize, result.getChunkSize());
                             assertEquals(2, result.getChunkCount());
+                            assertEquals("image/jpeg", result.getContentType());
 
                             testComplete();
                         }
