@@ -20,6 +20,7 @@
         <vertx.mod.cassandra.version>1.0.0-SNAPSHOT</vertx.mod.cassandra.version>
         <vertx.mod.hk2.version>1.6.0-SNAPSHOT</vertx.mod.hk2.version>
         <vertx.mod.metrics.version>1.0.0-SNAPSHOT</vertx.mod.metrics.version>
+        <vertx.mod.when.version>2.0.0-SNAPSHOT</vertx.mod.when.version>
     </properties>
 
     <dependencies>
@@ -39,6 +40,12 @@
             <groupId>com.englishtown</groupId>
             <artifactId>vertx-mod-metrics</artifactId>
             <version>${vertx.mod.metrics.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.englishtown</groupId>
+            <artifactId>vertx-mod-when</artifactId>
+            <version>${vertx.mod.when.version}</version>
             <scope>provided</scope>
         </dependency>
 
