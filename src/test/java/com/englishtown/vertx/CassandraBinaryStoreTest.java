@@ -1,6 +1,5 @@
 package com.englishtown.vertx;
 
-import com.codahale.metrics.MetricRegistry;
 import com.englishtown.vertx.cassandra.CassandraSession;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
@@ -24,7 +23,6 @@ import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Container;
 
-import javax.inject.Provider;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
@@ -59,8 +57,6 @@ public class CassandraBinaryStoreTest {
     @Mock
     Future<Void> startedResult;
     @Mock
-    Provider<MetricRegistry> registryProvider;
-    @Mock
     AsyncResult<Void> voidAsyncResult;
     @Captor
     ArgumentCaptor<FileInfo> fileInfoCaptor;
@@ -84,7 +80,7 @@ public class CassandraBinaryStoreTest {
         when(vertx.eventBus()).thenReturn(eventBus);
 
 
-        binaryStore = new CassandraBinaryStore(starter, binaryStoreManager, session, registryProvider);
+        binaryStore = new CassandraBinaryStore(starter, binaryStoreManager, session);
         binaryStore.setVertx(vertx);
         binaryStore.setContainer(container);
 
