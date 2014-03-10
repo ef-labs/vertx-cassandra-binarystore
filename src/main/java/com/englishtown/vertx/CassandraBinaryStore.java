@@ -23,14 +23,11 @@
 
 package com.englishtown.vertx;
 
+import com.codahale.metrics.Counter;
 import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.SharedMetricRegistries;
-import com.englishtown.vertx.cassandra.CassandraSession;
-import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
-import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
-import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
-import com.englishtown.vertx.cassandra.binarystore.FileInfo;
+import com.englishtown.vertx.cassandra.binarystore.*;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
 import com.englishtown.vertx.hk2.MetricsBinder;
@@ -52,37 +49,40 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import static com.codahale.metrics.MetricRegistry.name;
+
 /**
  * An EventBus module to save binary files in Cassandra
  */
 public class CassandraBinaryStore extends Verticle implements Handler<Message<JsonObject>> {
 
     public static final String DEFAULT_ADDRESS = "et.cassandra.binarystore";
-    private final BinaryStoreManager binaryStoreManager;
     private final MetricRegistry registry = SharedMetricRegistries.getOrCreate(MetricsBinder.SHARED_REGISTRY_NAME);
+
+    private final BinaryStoreStarter starter;
+    private final BinaryStoreManager binaryStoreManager;
 
     protected EventBus eb;
     protected Logger logger;
 
-    protected String keyspace;
-
-    protected CassandraSession session;
-    private final BinaryStoreStarter starter;
     private String address;
-    private JsonObject config;
+
     private JmxReporter reporter;
+    private Counter messageCounter;
+    private Counter errorCounter;
 
     @Inject
-    public CassandraBinaryStore(BinaryStoreStarter starter, BinaryStoreManager binaryStoreManager, CassandraSession session) {
+    public CassandraBinaryStore(BinaryStoreStarter starter, BinaryStoreManager binaryStoreManager) {
         this.starter = starter;
         this.binaryStoreManager = binaryStoreManager;
-        this.session = session;
-   }
+    }
 
     @Override
     public void start(final Future<Void> startedResult) {
 
         logger = container.logger();
+        messageCounter = registry.counter(name(Metrics.BASE_NAME, "eb.messages"));
+        errorCounter = registry.counter(name(Metrics.BASE_NAME, "eb.errors"));
 
         starter.run(new Handler<AsyncResult<Void>>() {
             @Override
@@ -101,7 +101,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
         eb = vertx.eventBus();
 
-        config = container.config();
+        JsonObject config = container.config();
         address = config.getString("address", DEFAULT_ADDRESS);
 
         // Main Message<JsonObject> handler that inspects an "action" field
@@ -111,6 +111,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         eb.registerHandler(address + "/saveChunk", new Handler<Message<Buffer>>() {
             @Override
             public void handle(Message<Buffer> message) {
+                messageCounter.inc();
                 saveChunk(message);
             }
         });
@@ -118,7 +119,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         // Start jmx metric reporter if enabled
         Map<String, Object> values = new HashMap<>();
         values.put("address", address);
-        values.put("keyspace", keyspace);
         reporter = com.englishtown.vertx.metrics.Utils.create(this, registry, values, config);
 
         startedResult.setResult(null);
@@ -127,13 +127,6 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     @Override
     public void stop() {
-        if (session != null) {
-            try {
-                session.close();
-            } catch (Exception e) {
-                logger.error("Error closing CassandraSession", e);
-            }
-        }
         if (reporter != null) {
             reporter.stop();
         }
@@ -142,6 +135,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     @Override
     public void handle(Message<JsonObject> message) {
 
+        messageCounter.inc();
         JsonObject jsonObject = message.body();
         String action = getRequiredString("action", message, jsonObject);
         if (action == null) {
@@ -398,6 +392,7 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
     }
 
     public <T> void sendError(Message<T> message, String error, Integer reason, Throwable e) {
+        errorCounter.inc();
         logger.error(error, e);
         JsonObject result = new JsonObject().putString("status", "error").putString("message", error);
         if (reason != null) {

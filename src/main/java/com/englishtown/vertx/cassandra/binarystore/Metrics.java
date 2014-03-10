@@ -16,7 +16,7 @@ public class Metrics {
     private final Counter readErrors;
     private final Counter writeErrors;
 
-    public final static String BASE_NAME = "com.englishtown.vertx.cassandra.binarystore";
+    public final static String BASE_NAME = "et.cass.binarystore";
 
     public Metrics(MetricRegistry registry, String type) {
 

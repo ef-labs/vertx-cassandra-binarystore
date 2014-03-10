@@ -80,7 +80,7 @@ public class CassandraBinaryStoreTest {
         when(vertx.eventBus()).thenReturn(eventBus);
 
 
-        binaryStore = new CassandraBinaryStore(starter, binaryStoreManager, session);
+        binaryStore = new CassandraBinaryStore(starter, binaryStoreManager);
         binaryStore.setVertx(vertx);
         binaryStore.setContainer(container);
 
@@ -100,11 +100,11 @@ public class CassandraBinaryStoreTest {
 
     }
 
-    @Test
-    public void testStop() throws Exception {
-        binaryStore.stop();
-        verify(session).close();
-    }
+//    @Test
+//    public void testStop() throws Exception {
+//        binaryStore.stop();
+//        verify(session).close();
+//    }
 
 //    @Test
 //    public void testEnsureSchema() throws Exception {
