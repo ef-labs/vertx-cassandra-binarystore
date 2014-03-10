@@ -1,13 +1,13 @@
 package com.englishtown.vertx.cassandra.binarystore.impl;
 
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.SharedMetricRegistries;
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.englishtown.vertx.cassandra.CassandraSession;
-import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
-import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStatements;
-import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
-import com.englishtown.vertx.cassandra.binarystore.FileInfo;
+import com.englishtown.vertx.cassandra.binarystore.*;
+import com.englishtown.vertx.hk2.MetricsBinder;
 import com.google.common.util.concurrent.FutureCallback;
 
 import javax.inject.Inject;
@@ -19,17 +19,26 @@ import java.util.UUID;
  */
 public class DefaultBinaryStoreManager implements BinaryStoreManager {
 
+    private final MetricRegistry registry = SharedMetricRegistries.getOrCreate(MetricsBinder.SHARED_REGISTRY_NAME);
+
     private final CassandraSession session;
     private final BinaryStoreStatements statements;
+    private final Metrics fileMetrics;
+    private final Metrics chunkMetrics;
 
     @Inject
     public DefaultBinaryStoreManager(CassandraSession session, BinaryStoreStatements statements) {
         this.session = session;
         this.statements = statements;
+
+        this.fileMetrics = new Metrics(registry, "files");
+        this.chunkMetrics = new Metrics(registry, "chunks");
     }
 
     @Override
     public void storeFile(FileInfo fileInfo, final FutureCallback<Void> callback) {
+
+        final Metrics.Context context = fileMetrics.timeWrite();
 
         BoundStatement insert = statements
                 .getStoreFile()
@@ -46,11 +55,15 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
         session.executeAsync(insert, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
+                if (context != null) context.stop();
+
                 callback.onSuccess(null);
             }
 
             @Override
             public void onFailure(Throwable t) {
+                if (context != null) context.error();
+
                 callback.onFailure(t);
             }
         });
@@ -59,6 +72,8 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
 
     @Override
     public void storeChunk(ChunkInfo chunkInfo, final FutureCallback<Void> callback) {
+
+        final Metrics.Context context = chunkMetrics.timeWrite();
 
         BoundStatement insert = statements
                 .getStoreChunk()
@@ -71,11 +86,15 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
         session.executeAsync(insert, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
+                if (context != null) context.stop();
+
                 callback.onSuccess(null);
             }
 
             @Override
             public void onFailure(Throwable t) {
+                if (context != null) context.error();
+
                 callback.onFailure(t);
             }
         });
@@ -85,12 +104,15 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
     @Override
     public void loadFile(final UUID id, final FutureCallback<FileInfo> callback) {
 
+        final Metrics.Context context = fileMetrics.timeRead();
+
         BoundStatement select = statements.getLoadFile().bind(id);
         session.executeAsync(select, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
                 Row row = result.one();
                 if (row == null) {
+                    context.stop();
                     callback.onSuccess(null);
                     return;
                 }
@@ -105,15 +127,18 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
                             .setUploadDate(row.getLong("uploadDate"))
                             .setMetadata(row.getMap("metadata", String.class, String.class));
 
+                    context.stop();
                     callback.onSuccess(fileInfo);
 
                 } catch (Throwable t) {
+                    context.error();
                     callback.onFailure(t);
                 }
             }
 
             @Override
             public void onFailure(Throwable t) {
+                context.error();
                 callback.onFailure(t);
             }
         });
@@ -122,12 +147,15 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
     @Override
     public void loadChunk(final UUID id, final int n, final FutureCallback<ChunkInfo> callback) {
 
+        final Metrics.Context context = chunkMetrics.timeRead();
+
         BoundStatement select = statements.getLoadChunk().bind(id, n);
         session.executeAsync(select, new FutureCallback<ResultSet>() {
             @Override
             public void onSuccess(ResultSet result) {
                 Row row = result.one();
                 if (row == null) {
+                    context.stop();
                     callback.onSuccess(null);
                     return;
                 }
@@ -142,15 +170,18 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
                     bb.get(data);
                     chunkInfo.setData(data);
 
+                    context.stop();
                     callback.onSuccess(chunkInfo);
 
                 } catch (Throwable t) {
+                    context.error();
                     callback.onFailure(t);
                 }
             }
 
             @Override
             public void onFailure(Throwable t) {
+                context.error();
                 callback.onFailure(t);
             }
         });
