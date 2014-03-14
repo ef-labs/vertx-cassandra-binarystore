@@ -1,5 +1,6 @@
 package com.englishtown.integration.java;
 
+import com.codahale.metrics.MetricRegistry;
 import com.datastax.driver.core.Cluster;
 import com.englishtown.vertx.cassandra.CassandraConfigurator;
 import com.englishtown.vertx.cassandra.CassandraSession;
@@ -97,7 +98,7 @@ public class BinaryStoreWriterIntegrationTest extends TestVerticle {
         CassandraSession session = new DefaultCassandraSession(builderProvider, configurator, vertx);
         BinaryStoreStatements statements = new DefaultBinaryStoreStatements();
         BinaryStoreStarter starter = new BinaryStoreStarter(session, configurator, statements, container);
-        BinaryStoreManager binaryStoreManager = new DefaultBinaryStoreManager(session, statements);
+        BinaryStoreManager binaryStoreManager = new DefaultBinaryStoreManager(session, statements, new MetricRegistry());
 
         binaryStoreWriter = new DefaultBinaryStoreWriter(binaryStoreManager);
 

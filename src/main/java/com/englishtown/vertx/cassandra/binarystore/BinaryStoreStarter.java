@@ -20,7 +20,7 @@ import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 /**
  * Created by adriangonzalez on 2/12/14.
  */
-public class BinaryStoreStarter {
+public class BinaryStoreStarter implements AutoCloseable {
 
     private final CassandraSession session;
     private final CassandraConfigurator configurator;
@@ -151,5 +151,14 @@ public class BinaryStoreStarter {
 
     }
 
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void close() throws Exception {
+        if (session != null) {
+            session.close();
+        }
+    }
 
 }

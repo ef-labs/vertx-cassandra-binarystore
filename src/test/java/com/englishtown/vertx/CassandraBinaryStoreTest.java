@@ -1,5 +1,6 @@
 package com.englishtown.vertx;
 
+import com.codahale.metrics.MetricRegistry;
 import com.englishtown.vertx.cassandra.CassandraSession;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
@@ -37,6 +38,7 @@ public class CassandraBinaryStoreTest {
     CassandraBinaryStore binaryStore;
     JsonObject config = new JsonObject();
     JsonObject jsonBody = new JsonObject();
+    MetricRegistry metricRegistry = new MetricRegistry();
 
     @Mock
     BinaryStoreStarter starter;
@@ -80,7 +82,7 @@ public class CassandraBinaryStoreTest {
         when(vertx.eventBus()).thenReturn(eventBus);
 
 
-        binaryStore = new CassandraBinaryStore(starter, binaryStoreManager);
+        binaryStore = new CassandraBinaryStore(starter, binaryStoreManager, metricRegistry);
         binaryStore.setVertx(vertx);
         binaryStore.setContainer(container);
 

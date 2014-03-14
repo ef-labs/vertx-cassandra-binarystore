@@ -26,11 +26,9 @@ package com.englishtown.vertx;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.SharedMetricRegistries;
 import com.englishtown.vertx.cassandra.binarystore.*;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
-import com.englishtown.vertx.hk2.MetricsBinder;
 import com.google.common.util.concurrent.FutureCallback;
 import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Future;
@@ -57,7 +55,6 @@ import static com.codahale.metrics.MetricRegistry.name;
 public class CassandraBinaryStore extends Verticle implements Handler<Message<JsonObject>> {
 
     public static final String DEFAULT_ADDRESS = "et.cassandra.binarystore";
-    private final MetricRegistry registry = SharedMetricRegistries.getOrCreate(MetricsBinder.SHARED_REGISTRY_NAME);
 
     private final BinaryStoreStarter starter;
     private final BinaryStoreManager binaryStoreManager;
@@ -67,14 +64,16 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
 
     private String address;
 
+    private final MetricRegistry registry;
     private JmxReporter reporter;
     private Counter messageCounter;
     private Counter errorCounter;
 
     @Inject
-    public CassandraBinaryStore(BinaryStoreStarter starter, BinaryStoreManager binaryStoreManager) {
+    public CassandraBinaryStore(BinaryStoreStarter starter, BinaryStoreManager binaryStoreManager, MetricRegistry registry) {
         this.starter = starter;
         this.binaryStoreManager = binaryStoreManager;
+        this.registry = registry;
     }
 
     @Override

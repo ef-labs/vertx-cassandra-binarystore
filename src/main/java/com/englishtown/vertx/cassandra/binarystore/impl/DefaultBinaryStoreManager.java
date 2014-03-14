@@ -1,13 +1,11 @@
 package com.englishtown.vertx.cassandra.binarystore.impl;
 
 import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.SharedMetricRegistries;
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.englishtown.vertx.cassandra.CassandraSession;
 import com.englishtown.vertx.cassandra.binarystore.*;
-import com.englishtown.vertx.hk2.MetricsBinder;
 import com.google.common.util.concurrent.FutureCallback;
 
 import javax.inject.Inject;
@@ -19,7 +17,7 @@ import java.util.UUID;
  */
 public class DefaultBinaryStoreManager implements BinaryStoreManager {
 
-    private final MetricRegistry registry = SharedMetricRegistries.getOrCreate(MetricsBinder.SHARED_REGISTRY_NAME);
+    private final MetricRegistry registry;
 
     private final CassandraSession session;
     private final BinaryStoreStatements statements;
@@ -27,9 +25,10 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
     private final Metrics chunkMetrics;
 
     @Inject
-    public DefaultBinaryStoreManager(CassandraSession session, BinaryStoreStatements statements) {
+    public DefaultBinaryStoreManager(CassandraSession session, BinaryStoreStatements statements, MetricRegistry registry) {
         this.session = session;
         this.statements = statements;
+        this.registry = registry;
 
         this.fileMetrics = new Metrics(registry, "files");
         this.chunkMetrics = new Metrics(registry, "chunks");
