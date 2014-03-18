@@ -94,10 +94,10 @@ public class BinaryStoreWriterIntegrationTest extends TestVerticle {
             }
         };
 
-        CassandraConfigurator configurator = new JsonCassandraConfigurator(new JsonObject());
+        CassandraConfigurator configurator = new JsonCassandraConfigurator(new JsonObject(), container);
         CassandraSession session = new DefaultCassandraSession(builderProvider, configurator, vertx);
         BinaryStoreStatements statements = new DefaultBinaryStoreStatements();
-        BinaryStoreStarter starter = new BinaryStoreStarter(session, configurator, statements, container);
+        BinaryStoreStarter starter = new BinaryStoreStarter(session, statements, container);
         BinaryStoreManager binaryStoreManager = new DefaultBinaryStoreManager(session, statements, new MetricRegistry());
 
         binaryStoreWriter = new DefaultBinaryStoreWriter(binaryStoreManager);

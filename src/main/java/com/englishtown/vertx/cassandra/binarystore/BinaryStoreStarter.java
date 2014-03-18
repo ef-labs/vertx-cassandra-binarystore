@@ -1,11 +1,9 @@
 package com.englishtown.vertx.cassandra.binarystore;
 
-import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.KeyspaceMetadata;
 import com.datastax.driver.core.Metadata;
 import com.datastax.driver.core.exceptions.AlreadyExistsException;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
-import com.englishtown.vertx.cassandra.CassandraConfigurator;
 import com.englishtown.vertx.cassandra.CassandraSession;
 import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Handler;
@@ -18,19 +16,17 @@ import static com.datastax.driver.core.querybuilder.QueryBuilder.bindMarker;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 
 /**
- * Created by adriangonzalez on 2/12/14.
+ * Initializes the binary store and closes it when finished
  */
 public class BinaryStoreStarter implements AutoCloseable {
 
     private final CassandraSession session;
-    private final CassandraConfigurator configurator;
     private final BinaryStoreStatements statements;
     private final Container container;
 
     @Inject
-    public BinaryStoreStarter(CassandraSession session, CassandraConfigurator configurator, BinaryStoreStatements statements, Container container) {
+    public BinaryStoreStarter(CassandraSession session, BinaryStoreStatements statements, Container container) {
         this.session = session;
-        this.configurator = configurator;
         this.statements = statements;
         this.container = container;
     }
@@ -139,15 +135,6 @@ public class BinaryStoreStarter implements AutoCloseable {
                 .getQueryString();
 
         statements.setLoadChunk(session.prepare(query));
-
-        // Get query consistency level
-        ConsistencyLevel consistency = configurator.getConsistency();
-        if (consistency != null) {
-            statements.getLoadChunk().setConsistencyLevel(consistency);
-            statements.getLoadFile().setConsistencyLevel(consistency);
-            statements.getStoreChunk().setConsistencyLevel(consistency);
-            statements.getStoreFile().setConsistencyLevel(consistency);
-        }
 
     }
 
