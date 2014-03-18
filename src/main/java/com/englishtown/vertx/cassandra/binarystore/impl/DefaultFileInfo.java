@@ -3,6 +3,7 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 import com.englishtown.vertx.cassandra.binarystore.FileInfo;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -98,4 +99,22 @@ public class DefaultFileInfo implements FileInfo {
         return this;
     }
 
+    @Override
+    public boolean equals(Object obj) {
+        if (obj == null) return false;
+        if (obj == this) return true;
+
+        if (! (obj instanceof FileInfo)) return false;
+
+        FileInfo other = (FileInfo) obj;
+
+        if (!Objects.equals(this.getId(), other.getId())) return false;
+        if (!Objects.equals(this.getFileName(), other.getFileName())) return false;
+        if (!Objects.equals(this.getContentType(), other.getContentType())) return false;
+        if (!Objects.equals(this.getLength(), other.getLength())) return false;
+        if (!Objects.equals(this.getChunkSize(), other.getChunkSize())) return false;
+        if (!Objects.equals(this.getUploadDate(), other.getUploadDate())) return false;
+
+        return true;
+    }
 }

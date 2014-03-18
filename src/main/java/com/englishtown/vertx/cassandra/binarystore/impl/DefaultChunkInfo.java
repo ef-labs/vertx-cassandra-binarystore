@@ -2,6 +2,8 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 
 import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
 
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -43,4 +45,19 @@ public class DefaultChunkInfo implements ChunkInfo {
         return this;
     }
 
+    @Override
+    public boolean equals(Object obj) {
+        if (obj == null) return false;
+        if (obj == this) return true;
+
+        if (! (obj instanceof ChunkInfo)) return false;
+
+        ChunkInfo other = (ChunkInfo) obj;
+
+        if (!Objects.equals(this.getId(), other.getId())) return false;
+        if (!Objects.equals(this.getNum(), other.getNum())) return false;
+        if (!Arrays.equals(this.getData(), other.getData())) return false;
+
+        return true;
+    }
 }
