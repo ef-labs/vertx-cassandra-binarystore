@@ -6,6 +6,8 @@ import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
 import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.FileInfo;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultChunkInfo;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
 import com.google.common.util.concurrent.FutureCallback;
 import org.junit.Before;
 import org.junit.Test;
@@ -18,6 +20,7 @@ import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.Vertx;
+import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.EventBus;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.json.JsonObject;
@@ -47,6 +50,8 @@ public class CassandraBinaryStoreTest {
     @Mock
     Message<JsonObject> jsonMessage;
     @Mock
+    Message<Buffer> bufferMessage;
+    @Mock
     CassandraSession session;
     @Mock
     Vertx vertx;
@@ -70,6 +75,9 @@ public class CassandraBinaryStoreTest {
     ArgumentCaptor<FutureCallback<ChunkInfo>> chunkInfoCallbackCaptor;
     @Captor
     ArgumentCaptor<Handler<AsyncResult<Void>>> asyncResultHandlerCaptor;
+
+    UUID uuid = UUID.fromString("901025d2-af7d-11e3-88fe-425861b86ab6");
+
 
 
     @Before
@@ -224,31 +232,83 @@ public class CassandraBinaryStoreTest {
     @Test
     public void testSaveChunk() throws Exception {
 
+
+        // Set up buffer and expected chunkinfo
+        JsonObject jsonObject = new JsonObject().putString("files_id", uuid.toString()).putNumber("n", 0);
+        byte[] jsonBytes = jsonObject.encode().getBytes("UTF-8");
+
+        Buffer buffer = new Buffer().appendInt(jsonBytes.length).appendBytes(jsonBytes).appendBytes("This is some data".getBytes());
+        ChunkInfo expectedChunkInfo = new DefaultChunkInfo().setId(uuid).setNum(0).setData("This is some data".getBytes());
+
+        // Set up interactions
+        when(bufferMessage.body()).thenReturn(buffer);
+
+        // When we call saveChunk with a buffer
+        binaryStore.saveChunk(bufferMessage);
+
+        // Then we expect binaryStoreManager to be called with our expected chunk info
+        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo), voidCallbackCaptor.capture());
+
+        // And then when we call success on the call back
+        voidCallbackCaptor.getValue().onSuccess(null);
+
+        // And we expect an ok reply
+        ArgumentCaptor<JsonObject> jsonCaptor = ArgumentCaptor.forClass(JsonObject.class);
+        verify(bufferMessage).reply(jsonCaptor.capture());
+
+        JsonObject reply = jsonCaptor.getValue();
+        assertEquals("ok", reply.getString("status"));
     }
 
     @Test
     public void testGetFile() throws Exception {
 
+        // Set things up
+        JsonObject jsonObject = new JsonObject().putString("id", uuid.toString());
+        DefaultFileInfo fileInfo = createFileInfo();
+        JsonObject expectedResult = new JsonObject()
+                .putString("filename", fileInfo.getFileName())
+                .putString("contentType", fileInfo.getContentType())
+                .putNumber("length", fileInfo.getLength())
+                .putNumber("chunkSize", fileInfo.getChunkSize())
+                .putNumber("uploadDate", fileInfo.getUploadDate())
+                .putString("status", "ok");
+
+        // When we call getFile on binary store
+        binaryStore.getFile(jsonMessage, jsonObject);
+
+        // Then we expect the binaryStoreManager load file method to be called with our ID
+        verify(binaryStoreManager).loadFile(eq(uuid), fileInfoCallbackCaptor.capture());
+
+        // When we call the callback's success method with our fileinfo object
+        fileInfoCallbackCaptor.getValue().onSuccess(fileInfo);
+
+        // Then we expect an OK reply with our expected JSON object
+        ArgumentCaptor<JsonObject> jsonCaptor = ArgumentCaptor.forClass(JsonObject.class);
+        verify(jsonMessage).reply(jsonCaptor.capture());
+
+        JsonObject reply = jsonCaptor.getValue();
+        assertEquals(expectedResult, reply);
     }
 
+    @SuppressWarnings("unchecked")
     @Test
     public void testGetChunk() throws Exception {
+        // Set up expected result and json object
+        ChunkInfo chunkInfo = new DefaultChunkInfo().setId(uuid).setNum(0).setData("This is some data".getBytes());
+        JsonObject jsonObject = new JsonObject().putString("files_id", uuid.toString()).putNumber("n", 0);
 
-    }
+        // When we call getChunk on binary store
+        binaryStore.getChunk(jsonMessage, jsonObject);
 
-    @Test
-    public void testExecuteQuery() throws Exception {
+        // Then we expect the binary store manager's loadchunk method to be called with the right info
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), chunkInfoCallbackCaptor.capture());
 
-    }
+        // When we call the onSuccess method with our chunkinfo
+        chunkInfoCallbackCaptor.getValue().onSuccess(chunkInfo);
 
-    @Test
-    public void testSendError() throws Exception {
-
-    }
-
-    @Test
-    public void testSendOK() throws Exception {
-
+        // Then we expect a message reply that contains the correct data
+        verify(jsonMessage).reply(eq("This is some data".getBytes()), any(Handler.class));
     }
 
     private void verifyError(String message) {
@@ -260,5 +320,15 @@ public class CassandraBinaryStoreTest {
         assertEquals("error", reply.getString("status"));
         assertEquals(message, reply.getString("message"));
 
+    }
+
+    private DefaultFileInfo createFileInfo() {
+        return new DefaultFileInfo()
+                .setChunkSize(100)
+                .setContentType("image/jpeg")
+                .setFileName("testfile.jpg")
+                .setId(uuid)
+                .setLength(150L)
+                .setUploadDate(123456789L);
     }
 }
