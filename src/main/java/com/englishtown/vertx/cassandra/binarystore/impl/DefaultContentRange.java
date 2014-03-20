@@ -47,7 +47,7 @@ public class DefaultContentRange implements ContentRange {
         if (obj == null) return false;
         if (obj == this) return true;
 
-        if (! (obj instanceof DefaultContentRange)) return false;
+        if (!(obj instanceof DefaultContentRange)) return false;
 
         DefaultContentRange other = (DefaultContentRange) obj;
 

@@ -16,7 +16,7 @@ import org.vertx.java.platform.Container;
 import java.util.UUID;
 
 import static com.englishtown.vertx.cassandra.binarystore.FileReader.Result;
-import static junit.framework.Assert.assertEquals;
+import static org.junit.Assert.assertEquals;
 import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.*;
 
@@ -150,8 +150,8 @@ public class DefaultBinaryStoreReaderTest {
     public void testReadWithRange() throws Exception {
         // Initialise
         ContentRange range = new DefaultContentRange()
-                                    .setFrom(5)
-                                    .setTo(15);
+                .setFrom(5)
+                .setTo(15);
         byte[] expectedRange = "fghijklmnopqrstuvwxy".getBytes();
 
         // When we call read and then set up the handlers for the File Reader

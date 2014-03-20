@@ -11,6 +11,8 @@ import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreWriter
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
 import com.englishtown.vertx.cassandra.impl.DefaultCassandraSession;
 import com.englishtown.vertx.cassandra.impl.JsonCassandraConfigurator;
+import com.englishtown.vertx.cassandra.promises.WhenCassandraSession;
+import com.englishtown.vertx.cassandra.promises.impl.DefaultWhenCassandraSession;
 import com.google.common.util.concurrent.FutureCallback;
 import org.junit.Test;
 import org.vertx.java.core.AsyncResult;
@@ -55,24 +57,24 @@ public class BinaryStoreWriterIntegrationTest extends TestVerticle {
                     FileInfo fi = new DefaultFileInfo().setFileName(name).setChunkSize(chunkSize);
 
                     binaryStoreWriter.write(fi, file, new FutureCallback<FileInfo>() {
-                        @Override
-                        public void onSuccess(FileInfo result) {
-                            assertNotNull(result);
-                            assertNotNull(result.getId());
-                            assertEquals(name, result.getFileName());
-                            assertEquals(length, result.getLength());
-                            assertEquals(chunkSize, result.getChunkSize());
-                            assertEquals(2, result.getChunkCount());
-                            assertEquals("image/jpeg", result.getContentType());
+                                @Override
+                                public void onSuccess(FileInfo result) {
+                                    assertNotNull(result);
+                                    assertNotNull(result.getId());
+                                    assertEquals(name, result.getFileName());
+                                    assertEquals(length, result.getLength());
+                                    assertEquals(chunkSize, result.getChunkSize());
+                                    assertEquals(2, result.getChunkCount());
+                                    assertEquals("image/jpeg", result.getContentType());
 
-                            testComplete();
-                        }
+                                    testComplete();
+                                }
 
-                        @Override
-                        public void onFailure(Throwable t) {
-                            fail(t.getMessage());
-                        }
-                    }
+                                @Override
+                                public void onFailure(Throwable t) {
+                                    fail(t.getMessage());
+                                }
+                            }
                     );
 
                 } else {
@@ -96,7 +98,8 @@ public class BinaryStoreWriterIntegrationTest extends TestVerticle {
 
         CassandraConfigurator configurator = new JsonCassandraConfigurator(new JsonObject(), container);
         CassandraSession session = new DefaultCassandraSession(builderProvider, configurator, vertx);
-        BinaryStoreStatements statements = new DefaultBinaryStoreStatements();
+        WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session);
+        BinaryStoreStatements statements = new DefaultBinaryStoreStatements(whenSession);
         BinaryStoreStarter starter = new BinaryStoreStarter(session, statements, container);
         BinaryStoreManager binaryStoreManager = new DefaultBinaryStoreManager(session, statements, new MetricRegistry());
 

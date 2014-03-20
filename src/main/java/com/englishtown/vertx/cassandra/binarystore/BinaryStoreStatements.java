@@ -1,15 +1,18 @@
 package com.englishtown.vertx.cassandra.binarystore;
 
 import com.datastax.driver.core.PreparedStatement;
+import com.google.common.util.concurrent.FutureCallback;
 
 /**
  * Contains cassandra statements for loading/storing files and chunks
  */
 public interface BinaryStoreStatements {
 
-    String getKeyspace();
+    boolean isInitialized();
 
-    BinaryStoreStatements setKeyspace(String keyspace);
+    void init(String keyspace, FutureCallback<Void> callback);
+
+    String getKeyspace();
 
     PreparedStatement getLoadChunk();
 

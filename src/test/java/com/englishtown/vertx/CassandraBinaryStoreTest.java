@@ -79,7 +79,6 @@ public class CassandraBinaryStoreTest {
     UUID uuid = UUID.fromString("901025d2-af7d-11e3-88fe-425861b86ab6");
 
 
-
     @Before
     public void setUp() throws Exception {
 

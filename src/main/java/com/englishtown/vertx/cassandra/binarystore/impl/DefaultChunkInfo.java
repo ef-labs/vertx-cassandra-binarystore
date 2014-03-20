@@ -50,7 +50,7 @@ public class DefaultChunkInfo implements ChunkInfo {
         if (obj == null) return false;
         if (obj == this) return true;
 
-        if (! (obj instanceof ChunkInfo)) return false;
+        if (!(obj instanceof ChunkInfo)) return false;
 
         ChunkInfo other = (ChunkInfo) obj;
 

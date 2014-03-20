@@ -52,9 +52,9 @@ public class DefaultBinaryStoreWriterTest {
     DefaultBinaryStoreWriter dbsw;
     DefaultFileInfo fileInfo;
     String[] names = {"test.zip", "test.png", "test.jpg", "test.jpeg", "test.mp3", "test.m4a", "test.mov", "test.mp4",
-                      "test.ogg", "test.webm"};
+            "test.ogg", "test.webm"};
     String[] types = {"application/zip", "image/png", "image/jpeg", "image/jpeg", "audio/mpeg", "audio/mp4",
-                      "video/quicktime", "video/mp4", "video/ogg", "video/webm"};
+            "video/quicktime", "video/mp4", "video/ogg", "video/webm"};
 
     @Before
     public void setUp() throws Exception {
@@ -172,7 +172,6 @@ public class DefaultBinaryStoreWriterTest {
             assertEquals(types[i], fileInfoArgumentCaptor.getValue().getContentType());
         }
     }
-
 
 
     private DefaultFileInfo createFileInfo() {

@@ -104,7 +104,7 @@ public class DefaultFileInfo implements FileInfo {
         if (obj == null) return false;
         if (obj == this) return true;
 
-        if (! (obj instanceof FileInfo)) return false;
+        if (!(obj instanceof FileInfo)) return false;
 
         FileInfo other = (FileInfo) obj;
 
