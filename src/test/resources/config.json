@@ -1,20 +1,2 @@
 {
-    "cassandra": {
-        "consistency_level": "one",
-        "seeds": ["127.0.0.1"],
-        "pooling": {
-            "core_connections_per_host_local": 2,
-            "core_connections_per_host_remote": 1,
-            "max_connections_per_host_local": 8,
-            "max_connections_per_host_remote": 2,
-            "max_simultaneous_requests_local": 100,
-            "max_simultaneous_requests_remote": 100
-        },
-        "policies": {
-            "load_balancing": {
-                "name": "DCAwareRoundRobinPolicy",
-                "local_dc": "datacenter1"
-            }
-        }
-    }
 }

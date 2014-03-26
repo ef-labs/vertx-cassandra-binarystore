@@ -10,7 +10,7 @@ import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreStatem
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreWriter;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
 import com.englishtown.vertx.cassandra.impl.DefaultCassandraSession;
-import com.englishtown.vertx.cassandra.impl.JsonCassandraConfigurator;
+import com.englishtown.vertx.cassandra.impl.EnvironmentCassandraConfigurator;
 import com.englishtown.vertx.cassandra.promises.WhenCassandraSession;
 import com.englishtown.vertx.cassandra.promises.impl.DefaultWhenCassandraSession;
 import com.google.common.util.concurrent.FutureCallback;
@@ -96,7 +96,7 @@ public class BinaryStoreWriterIntegrationTest extends TestVerticle {
             }
         };
 
-        CassandraConfigurator configurator = new JsonCassandraConfigurator(new JsonObject(), container);
+        CassandraConfigurator configurator = new EnvironmentCassandraConfigurator(new JsonObject(), container);
         CassandraSession session = new DefaultCassandraSession(builderProvider, configurator, vertx);
         WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session);
         BinaryStoreStatements statements = new DefaultBinaryStoreStatements(whenSession);
