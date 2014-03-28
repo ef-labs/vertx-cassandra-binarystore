@@ -10,6 +10,7 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 import org.vertx.java.core.Handler;
+import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Container;
 
@@ -31,9 +32,11 @@ public class DefaultBinaryStoreReaderTest {
     @Mock
     Container container;
     @Mock
-    Handler<byte[]> dataHandler;
+    Handler<Buffer> dataHandler;
     @Mock
-    Handler<Result> endHandler;
+    Handler<Void> endHandler;
+    @Mock
+    Handler<Result> resultHandler;
     @Mock
     Handler<FileReadInfo> fileHandler;
     @Mock
@@ -64,6 +67,7 @@ public class DefaultBinaryStoreReaderTest {
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.read(uuid);
         fileReader.dataHandler(dataHandler);
+        fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
         fileReader.exceptionHandler(exceptionHandler);
@@ -84,10 +88,11 @@ public class DefaultBinaryStoreReaderTest {
 
         // and when we then call its success method
         byte[] data = "This is chunk 0".getBytes();
+        Buffer buffer = new Buffer(data);
         loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data
-        verify(dataHandler).handle(eq(data));
+        verify(dataHandler).handle(eq(buffer));
 
         // Then we expect loadChunks to be called again
         verify(binaryStoreManager).loadChunk(eq(uuid), eq(1), loadChunkArgumentCaptor.capture());
@@ -96,7 +101,8 @@ public class DefaultBinaryStoreReaderTest {
         loadChunkArgumentCaptor.getValue().onSuccess(null);
 
         // We expect our end handler to be called with the OK result
-        verify(endHandler).handle(Result.OK);
+        verify(resultHandler).handle(Result.OK);
+        verify(endHandler).handle(null);
     }
 
     @Test
@@ -105,6 +111,7 @@ public class DefaultBinaryStoreReaderTest {
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.read(uuid);
         fileReader.dataHandler(dataHandler);
+        fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
         fileReader.exceptionHandler(exceptionHandler);
@@ -122,7 +129,8 @@ public class DefaultBinaryStoreReaderTest {
         loadChunkArgumentCaptor.getValue().onFailure(new Throwable("Error"));
 
         // We expect the end handler to be called with the error result
-        verify(endHandler).handle(Result.ERROR);
+        verify(resultHandler).handle(Result.ERROR);
+        verify(endHandler).handle(null);
     }
 
     @Test
@@ -131,6 +139,7 @@ public class DefaultBinaryStoreReaderTest {
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.read(uuid);
         fileReader.dataHandler(dataHandler);
+        fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
         fileReader.exceptionHandler(exceptionHandler);
@@ -153,10 +162,12 @@ public class DefaultBinaryStoreReaderTest {
                 .setFrom(5)
                 .setTo(15);
         byte[] expectedRange = "fghijklmnopqrstuvwxy".getBytes();
+        Buffer expectedRangeBuffer = new Buffer(expectedRange);
 
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.readRange(uuid, range);
         fileReader.dataHandler(dataHandler);
+        fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
         fileReader.exceptionHandler(exceptionHandler);
@@ -178,13 +189,15 @@ public class DefaultBinaryStoreReaderTest {
 
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
+        Buffer buffer = new Buffer(data);
         loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
-        verify(dataHandler).handle(eq(expectedRange));
+        verify(dataHandler).handle(eq(expectedRangeBuffer));
 
         // And we then expect the end handler to be called with the OK result
-        verify(endHandler).handle(Result.OK);
+        verify(resultHandler).handle(Result.OK);
+        verify(endHandler).handle(null);
     }
 
     private FileInfo createFileInfo() {

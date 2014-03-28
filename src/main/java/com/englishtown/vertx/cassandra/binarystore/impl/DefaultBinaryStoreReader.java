@@ -3,6 +3,7 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 import com.englishtown.vertx.cassandra.binarystore.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.FutureCallback;
+import org.vertx.java.core.Handler;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Container;
 
@@ -75,6 +76,16 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
 
         if (n == count) {
             reader.handleEnd(FileReader.Result.OK);
+            return;
+        }
+
+        if (reader.isPaused()) {
+            reader.resumeHandler(new Handler<Void>() {
+                @Override
+                public void handle(Void event) {
+                    loadChunks(n, count, fileInfo, reader);
+                }
+            });
             return;
         }
 

@@ -42,7 +42,7 @@ import static org.vertx.testtools.VertxAssert.*;
 /**
  * Integration test showing a write and then reading it back
  */
-public class BasicIntegrationTest extends TestVerticle {
+public class EventBusIntegrationTest extends TestVerticle {
 
     private EventBus eventBus;
     private final String address = CassandraBinaryStore.DEFAULT_ADDRESS;

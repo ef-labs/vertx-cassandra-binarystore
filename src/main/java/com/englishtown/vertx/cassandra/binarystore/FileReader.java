@@ -1,12 +1,12 @@
 package com.englishtown.vertx.cassandra.binarystore;
 
 import org.vertx.java.core.Handler;
-import org.vertx.java.core.streams.ExceptionSupport;
+import org.vertx.java.core.streams.ReadStream;
 
 /**
  * A stream for {@link com.englishtown.vertx.cassandra.binarystore.FileInfo} data
  */
-public interface FileReader extends ExceptionSupport<FileReader> {
+public interface FileReader extends ReadStream<FileReader> {
 
     public enum Result {
         OK,
@@ -23,19 +23,11 @@ public interface FileReader extends ExceptionSupport<FileReader> {
     FileReader fileHandler(Handler<FileReadInfo> handler);
 
     /**
-     * Sets the handler for when data is read from the binary store
+     * Set a result handler. Once the stream has ended, and there is no more data to be read, this handler will be called.
      *
      * @param handler
      * @return
      */
-    FileReader dataHandler(Handler<byte[]> handler);
-
-    /**
-     * Sets the handler for when all the data has been read
-     *
-     * @param handler
-     * @return
-     */
-    FileReader endHandler(Handler<Result> handler);
+    FileReader resultHandler(Handler<Result> handler);
 
 }

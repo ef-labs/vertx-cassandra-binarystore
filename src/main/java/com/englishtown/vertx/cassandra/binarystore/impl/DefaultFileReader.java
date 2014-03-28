@@ -3,6 +3,7 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 import com.englishtown.vertx.cassandra.binarystore.FileReadInfo;
 import com.englishtown.vertx.cassandra.binarystore.FileReader;
 import org.vertx.java.core.Handler;
+import org.vertx.java.core.buffer.Buffer;
 
 /**
  * Default implementation of {@link com.englishtown.vertx.cassandra.binarystore.FileReader}
@@ -10,9 +11,13 @@ import org.vertx.java.core.Handler;
 class DefaultFileReader implements FileReader {
 
     private Handler<FileReadInfo> fileHandler;
-    private Handler<byte[]> dataHandler;
-    private Handler<Result> endHandler;
+    private Handler<Buffer> dataHandler;
+    private Handler<Void> endHandler;
+    private Handler<Result> resultHandler;
     private Handler<Throwable> exceptionHandler;
+
+    private boolean paused;
+    private Handler<Void> resumeHandler;
 
     @Override
     public DefaultFileReader fileHandler(Handler<FileReadInfo> handler) {
@@ -21,14 +26,43 @@ class DefaultFileReader implements FileReader {
     }
 
     @Override
-    public DefaultFileReader dataHandler(Handler<byte[]> handler) {
+    public DefaultFileReader dataHandler(Handler<Buffer> handler) {
         dataHandler = handler;
         return this;
     }
 
+    /**
+     * Pause the {@code ReadSupport}. While it's paused, no data will be sent to the {@code dataHandler}
+     */
     @Override
-    public DefaultFileReader endHandler(Handler<Result> handler) {
+    public DefaultFileReader pause() {
+        paused = true;
+        return this;
+    }
+
+    /**
+     * Resume reading. If the {@code ReadSupport} has been paused, reading will recommence on it.
+     */
+    @Override
+    public DefaultFileReader resume() {
+        paused = false;
+        if (resumeHandler != null) {
+            Handler<Void> handler = resumeHandler;
+            resumeHandler = null;
+            handler.handle(null);
+        }
+        return this;
+    }
+
+    @Override
+    public DefaultFileReader endHandler(Handler<Void> handler) {
         endHandler = handler;
+        return this;
+    }
+
+    @Override
+    public DefaultFileReader resultHandler(Handler<Result> handler) {
+        resultHandler = handler;
         return this;
     }
 
@@ -45,14 +79,21 @@ class DefaultFileReader implements FileReader {
     }
 
     public void handleData(byte[] data) {
+        handleData(new Buffer(data));
+    }
+
+    public void handleData(Buffer data) {
         if (dataHandler != null) {
             dataHandler.handle(data);
         }
     }
 
     public void handleEnd(Result result) {
+        if (resultHandler != null) {
+            resultHandler.handle(result);
+        }
         if (endHandler != null) {
-            endHandler.handle(result);
+            endHandler.handle(null);
         }
     }
 
@@ -62,4 +103,11 @@ class DefaultFileReader implements FileReader {
         }
     }
 
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public void resumeHandler(Handler<Void> handler) {
+        resumeHandler = handler;
+    }
 }
