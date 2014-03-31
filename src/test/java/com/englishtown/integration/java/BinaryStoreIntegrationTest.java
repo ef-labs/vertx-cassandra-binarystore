@@ -124,9 +124,10 @@ public class BinaryStoreIntegrationTest extends TestVerticle {
                     @Override
                     public void handle(Void event) {
 
-                        FileReadInfo fileReadInfo = finalFileReadInfo[0];
                         FileReader.Result result = finalResult[0];
+                        assertEquals(FileReader.Result.OK, result);
 
+                        FileReadInfo fileReadInfo = finalFileReadInfo[0];
                         assertNotNull(fileReadInfo);
                         FileInfo fileInfo = fileReadInfo.getFile();
 
@@ -136,7 +137,6 @@ public class BinaryStoreIntegrationTest extends TestVerticle {
                         assertEquals(FILE_LENGTH, fileInfo.getLength());
 
                         assertEquals(FILE_LENGTH, finalBuffer.length());
-                        assertEquals(FileReader.Result.OK, result);
 
                         testComplete();
 
