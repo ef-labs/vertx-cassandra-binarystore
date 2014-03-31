@@ -1,6 +1,8 @@
 package com.englishtown.vertx.cassandra.binarystore.impl;
 
 import com.datastax.driver.core.*;
+import com.datastax.driver.core.policies.LoadBalancingPolicy;
+import com.datastax.driver.core.policies.Policies;
 import com.englishtown.promises.FulfilledRunnable;
 import com.englishtown.promises.Promise;
 import com.englishtown.promises.RejectedRunnable;
@@ -35,6 +37,14 @@ public class DefaultBinaryStoreStatementsTest {
     @Mock
     WhenCassandraSession session;
     @Mock
+    Cluster cluster;
+    @Mock
+    Configuration configuration;
+    @Mock
+    Policies policies;
+    @Mock
+    LoadBalancingPolicy lbPolicy;
+    @Mock
     FutureCallback<Void> callback;
     @Mock
     Metadata metadata;
@@ -51,6 +61,11 @@ public class DefaultBinaryStoreStatementsTest {
     public void setUp() throws Exception {
         when(session.getMetadata()).thenReturn(metadata);
         when(session.executeAsync(any(RegularStatement.class))).thenReturn(resultSetPromise).thenReturn(null);
+        when(session.getCluster()).thenReturn(cluster);
+        when(cluster.getConfiguration()).thenReturn(configuration);
+        when(configuration.getPolicies()).thenReturn(policies);
+        when(policies.getLoadBalancingPolicy()).thenReturn(lbPolicy);
+        when(lbPolicy.distance(any(Host.class))).thenReturn(HostDistance.LOCAL);
     }
 
     @Test

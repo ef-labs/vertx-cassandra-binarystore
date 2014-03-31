@@ -1,6 +1,7 @@
 package com.englishtown.vertx.cassandra.binarystore.impl;
 
 import com.datastax.driver.core.*;
+import com.datastax.driver.core.policies.LoadBalancingPolicy;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.englishtown.promises.*;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStatements;
@@ -157,9 +158,31 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
             return when.resolve(kmd);
         }
 
+        LoadBalancingPolicy lbPolicy = session.getCluster().getConfiguration().getPolicies().getLoadBalancingPolicy();
+        String dc = null;
+        int count = 0;
+
+        for (Host host : metadata.getAllHosts()) {
+            if (lbPolicy.distance(host) == HostDistance.LOCAL) {
+                dc = host.getDatacenter();
+                count++;
+            }
+        }
+
+        StringBuilder replication = new StringBuilder();
+
+        if (count > 0) {
+            replication.append("= {'class':'NetworkTopologyStrategy', '")
+                    .append(dc)
+                    .append("':")
+                    .append((count > 2 ? 3 : count == 2 ? 2 : 1))
+                    .append("};");
+        } else {
+            replication.append("= {'class':'SimpleStrategy', 'replication_factor':3};");
+        }
+
         final Deferred<KeyspaceMetadata> d = when.defer();
-        String cql = "CREATE KEYSPACE IF NOT EXISTS " + keyspace + " WITH replication " +
-                "= {'class':'SimpleStrategy', 'replication_factor':3};";
+        String cql = "CREATE KEYSPACE IF NOT EXISTS " + keyspace + " WITH replication " + replication.toString();
 
         session.executeAsync(new SimpleStatement(cql)).then(
                 new FulfilledRunnable<ResultSet>() {

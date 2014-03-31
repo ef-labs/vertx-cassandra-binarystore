@@ -1,2 +1,3 @@
 {
+    "keyspace": "test_binarystore"
 }
