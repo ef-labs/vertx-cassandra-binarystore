@@ -1,3 +1,8 @@
 {
-    "keyspace": "test_binarystore"
+    "keyspace": "test_binarystore",
+
+    "cassandra" : {
+        "consistency_level": "local_quorum"
+    }
+
 }

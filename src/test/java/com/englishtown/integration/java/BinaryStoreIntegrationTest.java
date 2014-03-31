@@ -165,7 +165,10 @@ public class BinaryStoreIntegrationTest extends TestVerticle {
             }
         };
 
-        CassandraConfigurator configurator = new EnvironmentCassandraConfigurator(new JsonObject(), container);
+        JsonObject config = IntegrationTestHelper.loadConfig();
+        container.config().mergeIn(config);
+
+        CassandraConfigurator configurator = new EnvironmentCassandraConfigurator(container);
         CassandraSession session = new DefaultCassandraSession(builderProvider, configurator, vertx);
         WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session);
         BinaryStoreStatements statements = new DefaultBinaryStoreStatements(whenSession);
