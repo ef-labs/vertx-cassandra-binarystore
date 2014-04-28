@@ -161,7 +161,7 @@ public class DefaultBinaryStoreReaderTest {
         ContentRange range = new DefaultContentRange()
                 .setFrom(5)
                 .setTo(15);
-        byte[] expectedRange = "fghijklmnopqrstuvwxy".getBytes();
+        byte[] expectedRange = "fghijklmnop".getBytes();
         Buffer expectedRangeBuffer = new Buffer(expectedRange);
 
         // When we call read and then set up the handlers for the File Reader
@@ -189,11 +189,161 @@ public class DefaultBinaryStoreReaderTest {
 
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
-        Buffer buffer = new Buffer(data);
         loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBuffer));
+
+        // And we then expect the end handler to be called with the OK result
+        verify(resultHandler).handle(Result.OK);
+        verify(endHandler).handle(null);
+    }
+
+    @Test
+    public void testRangeReadOfFinalByte() throws Exception {
+        // Initialise
+        ContentRange range = new DefaultContentRange()
+                .setFrom(25)
+                .setTo(25);
+        byte[] expectedRange = "z".getBytes();
+        Buffer expectedRangeBuffer = new Buffer(expectedRange);
+
+        // When we call read and then set up the handlers for the File Reader
+        FileReader fileReader = dbsr.readRange(uuid, range);
+        fileReader.dataHandler(dataHandler);
+        fileReader.resultHandler(resultHandler);
+        fileReader.endHandler(endHandler);
+        fileReader.fileHandler(fileHandler);
+        fileReader.exceptionHandler(exceptionHandler);
+
+        // and capture the cassandra callback and call the onSuccess method on it
+        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+
+        // and when we then call the success method on the binarystore callback
+        loadFileArgumentCaptor.getValue().onSuccess(fileInfo);
+
+        // We expect the file handler on our fileReader to be called with a defaultfilereadinfo that contains our
+        // created fileinfo
+        verify(fileHandler).handle(fileHandlerArgumentCaptor.capture());
+        assertEquals(fileHandlerArgumentCaptor.getValue().getFile(), fileInfo);
+        assertEquals(fileHandlerArgumentCaptor.getValue().getRange(), range);
+
+        // When the loadChunk method is called
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+
+        // and when we then call its success method
+        byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
+        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+
+        // We expect our data handler to be called with our data, within the right range
+        verify(dataHandler).handle(eq(expectedRangeBuffer));
+
+        // And we then expect the end handler to be called with the OK result
+        verify(resultHandler).handle(Result.OK);
+        verify(endHandler).handle(null);
+    }
+
+    @Test
+    public void testRangeReadOfFirstByte() throws Exception {
+        // Initialise
+        ContentRange range = new DefaultContentRange()
+                .setFrom(0)
+                .setTo(0);
+        byte[] expectedRange = "a".getBytes();
+        Buffer expectedRangeBuffer = new Buffer(expectedRange);
+
+        // When we call read and then set up the handlers for the File Reader
+        FileReader fileReader = dbsr.readRange(uuid, range);
+        fileReader.dataHandler(dataHandler);
+        fileReader.resultHandler(resultHandler);
+        fileReader.endHandler(endHandler);
+        fileReader.fileHandler(fileHandler);
+        fileReader.exceptionHandler(exceptionHandler);
+
+        // and capture the cassandra callback and call the onSuccess method on it
+        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+
+        // and when we then call the success method on the binarystore callback
+        loadFileArgumentCaptor.getValue().onSuccess(fileInfo);
+
+        // We expect the file handler on our fileReader to be called with a defaultfilereadinfo that contains our
+        // created fileinfo
+        verify(fileHandler).handle(fileHandlerArgumentCaptor.capture());
+        assertEquals(fileHandlerArgumentCaptor.getValue().getFile(), fileInfo);
+        assertEquals(fileHandlerArgumentCaptor.getValue().getRange(), range);
+
+        // When the loadChunk method is called
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+
+        // and when we then call its success method
+        byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
+        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+
+        // We expect our data handler to be called with our data, within the right range
+        verify(dataHandler).handle(eq(expectedRangeBuffer));
+
+        // And we then expect the end handler to be called with the OK result
+        verify(resultHandler).handle(Result.OK);
+        verify(endHandler).handle(null);
+    }
+
+    @Test
+    public void testRangeReadOverMultipleChunks() throws Exception {
+        // Initialise
+        FileInfo multiChunkFile = new DefaultFileInfo()
+                .setChunkSize(26)
+                .setContentType("image/jpeg")
+                .setFileName("testfile.jpg")
+                .setId(uuid)
+                .setLength(52L)
+                .setUploadDate(123456789L);
+
+        ContentRange range = new DefaultContentRange()
+                .setFrom(20)
+                .setTo(30);
+        byte[] expectedRangeForChunk1 = "uvwxyz".getBytes();
+        Buffer expectedRangeBufferForChunk1 = new Buffer(expectedRangeForChunk1);
+        byte[] expectedRangeForChunk2 = "abcde".getBytes();
+        Buffer expectedRangeBufferForChunk2 = new Buffer(expectedRangeForChunk2);
+
+        // When we call read and then set up the handlers for the File Reader
+        FileReader fileReader = dbsr.readRange(uuid, range);
+        fileReader.dataHandler(dataHandler);
+        fileReader.resultHandler(resultHandler);
+        fileReader.endHandler(endHandler);
+        fileReader.fileHandler(fileHandler);
+        fileReader.exceptionHandler(exceptionHandler);
+
+        // and capture the cassandra callback and call the onSuccess method on it
+        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+
+        // and when we then call the success method on the binarystore callback
+        loadFileArgumentCaptor.getValue().onSuccess(multiChunkFile);
+
+        // We expect the file handler on our fileReader to be called with a defaultfilereadinfo that contains our
+        // created fileinfo
+        verify(fileHandler).handle(fileHandlerArgumentCaptor.capture());
+        assertEquals(fileHandlerArgumentCaptor.getValue().getFile(), multiChunkFile);
+        assertEquals(fileHandlerArgumentCaptor.getValue().getRange(), range);
+
+        // When the loadChunk method is called
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+
+        // and when we then call its success method
+        byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
+        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+
+        // We expect our data handler to be called with our data, within the right range
+        verify(dataHandler).handle(eq(expectedRangeBufferForChunk1));
+
+        // When the loadChunk method is called
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(1), loadChunkArgumentCaptor.capture());
+
+        // and when we then call its success method
+        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(1).setData(data));
+
+        // We expect our data handler to be called with our data, within the right range
+        verify(dataHandler).handle(eq(expectedRangeBufferForChunk2));
 
         // And we then expect the end handler to be called with the OK result
         verify(resultHandler).handle(Result.OK);

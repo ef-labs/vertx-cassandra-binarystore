@@ -146,6 +146,7 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
 
         private final int startChunk;
         private final int endChunk;
+
         private final int startPos;
         private final int endPos;
 
@@ -157,7 +158,7 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
 
             long from = range.getFrom();
             long to = fileInfo.getLength() - 1;
-            if (range.getTo() > 0 && range.getTo() < to) {
+            if (range.getTo() >= 0 && range.getTo() < to) {
                 to = range.getTo();
             }
 
@@ -173,14 +174,33 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
         }
 
         public byte[] getRequiredBytesFromChunk(int chunkNumber, byte[] chunk) {
-            if (chunkNumber == startChunk) {
-                return Arrays.copyOfRange(chunk, startPos, chunk.length - 1);
+
+            /*
+             * The rules are: 1. If this is the start chunk, but not the end chunk, then we want bytes: startpos - chunk_length
+             *                2. If this is the end chunk, but not the start chunk, then we want bytes: 0 - (endpos+1)
+             *                3. If this is both the start and end chunk then we want bytes: startpos - (endpos+1)
+             *                4. If it's none of these then we want the whole chunk
+             *
+             * The +1s are there because Arrays.copyOfRange end position parameter is exclusive.
+             */
+
+            // If this is the start chunk and not the end chunk, we want to take all the bytes from start position to the end of the chunk
+            if (chunkNumber == startChunk && chunkNumber != endChunk) {
+                return Arrays.copyOfRange(chunk, startPos, chunk.length);
             }
 
-            if (chunkNumber == endChunk) {
-                return Arrays.copyOfRange(chunk, 0, endPos);
+
+            // If this is the end chunk and not also the start chunk, we want to take all of the bytes from the beginning of the chunk up to the end.
+            if (chunkNumber == endChunk && chunkNumber != startChunk) {
+                return Arrays.copyOfRange(chunk, 0, endPos + 1);
             }
 
+            // In the instance that this is *both* the start and end chunk, then we want to only return the bytes between start and end pos
+            if (chunkNumber == startChunk && chunkNumber == endChunk) {
+                return Arrays.copyOfRange(chunk, startPos, endPos + 1);
+            }
+
+            // Finally, we get here if this chunk is neither a start or end chunk, in which case we want the whole thing.
             return chunk;
         }
 
