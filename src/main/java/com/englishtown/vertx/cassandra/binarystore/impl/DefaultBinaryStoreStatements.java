@@ -227,7 +227,7 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
                             "files_id uuid," +
                             "n int," +
                             "data blob," +
-                            "PRIMARY KEY (files_id, n)" +
+                            "PRIMARY KEY ((files_id, n))" +
                             ");";
 
             promises.add(session.executeAsync(new SimpleStatement(cql)));
