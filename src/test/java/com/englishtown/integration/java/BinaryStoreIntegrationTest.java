@@ -158,18 +158,12 @@ public class BinaryStoreIntegrationTest extends TestVerticle {
     public void start(final Future<Void> startedResult) {
 
         final Cluster.Builder builder = new Cluster.Builder();
-        Provider<Cluster.Builder> builderProvider = new Provider<Cluster.Builder>() {
-            @Override
-            public Cluster.Builder get() {
-                return builder;
-            }
-        };
 
         JsonObject config = IntegrationTestHelper.loadConfig();
         container.config().mergeIn(config);
 
         CassandraConfigurator configurator = new EnvironmentCassandraConfigurator(container);
-        CassandraSession session = new DefaultCassandraSession(builderProvider, configurator, vertx);
+        CassandraSession session = new DefaultCassandraSession(builder, configurator, vertx);
         WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session);
         BinaryStoreStatements statements = new DefaultBinaryStoreStatements(whenSession);
         BinaryStoreStarter starter = new BinaryStoreStarter(session, statements, container);
