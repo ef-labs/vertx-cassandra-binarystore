@@ -20,7 +20,7 @@
         <vertx.mod.cassandra.version>1.1.0</vertx.mod.cassandra.version>
         <vertx.mod.hk2.version>1.7.0</vertx.mod.hk2.version>
         <vertx.mod.metrics.version>1.0.0</vertx.mod.metrics.version>
-        <vertx.mod.when.version>2.0.0</vertx.mod.when.version>
+        <vertx.mod.when.version>2.0.1</vertx.mod.when.version>
     </properties>
 
     <dependencies>
