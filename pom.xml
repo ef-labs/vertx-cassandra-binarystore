@@ -4,7 +4,7 @@
 
     <artifactId>vertx-mod-cassandra-binarystore</artifactId>
     <packaging>jar</packaging>
-    <version>1.2.1</version>
+    <version>1.2.2-SNAPSHOT</version>
     <name>vertx-mod-cassandra-binarystore</name>
     <url>https://github.com/englishtown/vertx-mod-cassandra-binarystore</url>
 
