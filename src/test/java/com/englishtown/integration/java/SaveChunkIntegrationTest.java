@@ -25,7 +25,6 @@ package com.englishtown.integration.java;
 
 import com.englishtown.vertx.CassandraBinaryStore;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
@@ -43,7 +42,6 @@ import static org.vertx.testtools.VertxAssert.testComplete;
 /**
  * Integration tests for the saveChunk operation
  */
-@RunWith(CPJavaClassRunner.class)
 public class SaveChunkIntegrationTest extends TestVerticle {
 
     private EventBus eventBus;

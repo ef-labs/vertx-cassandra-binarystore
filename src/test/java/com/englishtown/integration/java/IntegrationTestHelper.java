@@ -67,7 +67,7 @@ public class IntegrationTestHelper {
 
     }
 
-    private static JsonObject loadConfig() {
+    public static JsonObject loadConfig() {
 
         try (InputStream stream = IntegrationTestHelper.class.getResourceAsStream("/config.json")) {
             StringBuilder sb = new StringBuilder();
