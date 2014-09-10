@@ -2,7 +2,7 @@
     "main": "com.englishtown.vertx.CassandraBinaryStore",
     "worker": true,
     "multi-threaded": true,
-    "includes": "com.englishtown~vertx-mod-cassandra~1.1.0,com.englishtown~vertx-mod-metrics~1.1.0,com.englishtown~vertx-mod-when~2.0.1",
+    "includes": "com.englishtown~vertx-mod-cassandra~1.3.0-SNAPSHOT,com.englishtown~vertx-mod-metrics~1.1.0,com.englishtown~vertx-mod-when~2.0.1",
 
     "description": "Read and write binary files to Cassandra in chunks v2",
     "licenses": ["The MIT License"],
