@@ -11,13 +11,14 @@
     <parent>
         <groupId>com.englishtown</groupId>
         <artifactId>oss-parent-vertx</artifactId>
-        <version>1.4.0</version>
+        <version>1.5.0</version>
     </parent>
 
     <properties>
         <!--Dependency versions-->
+        <vertx.version>2.1.2</vertx.version>
         <mockito.version>1.9.5</mockito.version>
-        <vertx.mod.cassandra.version>1.3.0-SNAPSHOT</vertx.mod.cassandra.version>
+        <vertx.mod.cassandra.version>1.3.0</vertx.mod.cassandra.version>
         <vertx.mod.hk2.version>1.7.0</vertx.mod.hk2.version>
         <vertx.mod.metrics.version>1.0.0</vertx.mod.metrics.version>
         <vertx.mod.when.version>2.0.1</vertx.mod.when.version>
