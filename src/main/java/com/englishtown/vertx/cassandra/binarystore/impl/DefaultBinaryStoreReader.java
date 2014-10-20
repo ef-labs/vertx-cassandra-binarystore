@@ -2,8 +2,6 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 
 import com.englishtown.vertx.cassandra.binarystore.*;
 import com.google.common.primitives.Ints;
-import com.google.common.util.concurrent.FutureCallback;
-import org.vertx.java.core.Handler;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Container;
 
@@ -39,34 +37,32 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
 
         final DefaultFileReader reader = new DefaultFileReader();
 
-        binaryStoreManager.loadFile(id, new FutureCallback<FileInfo>() {
-            @Override
-            public void onSuccess(FileInfo fileInfo) {
-                if (fileInfo == null) {
-                    reader.handleEnd(FileReader.Result.NOT_FOUND);
-                    return;
-                }
+        binaryStoreManager.loadFile(id)
+                .then(fileInfo -> {
+                    if (fileInfo == null) {
+                        reader.handleEnd(FileReader.Result.NOT_FOUND);
+                        return null;
+                    }
 
-                if (range == null) {
-                    reader.handleFile(new DefaultFileReadInfo().setFile(fileInfo));
-                    loadChunks(0, fileInfo.getChunkCount(), fileInfo, reader);
-                } else {
-                    RangeInfo rangeInfo = new RangeInfo(range, fileInfo);
-                    ContentRange updatedRange = new DefaultContentRange()
-                            .setFrom(rangeInfo.getFrom())
-                            .setTo(rangeInfo.getTo());
+                    if (range == null) {
+                        reader.handleFile(new DefaultFileReadInfo().setFile(fileInfo));
+                        loadChunks(0, fileInfo.getChunkCount(), fileInfo, reader);
+                    } else {
+                        RangeInfo rangeInfo = new RangeInfo(range, fileInfo);
+                        ContentRange updatedRange = new DefaultContentRange()
+                                .setFrom(rangeInfo.getFrom())
+                                .setTo(rangeInfo.getTo());
 
-                    reader.handleFile(new DefaultFileReadInfo().setFile(fileInfo).setRange(updatedRange));
-                    loadRangeChunks(rangeInfo.getStartChunk(), rangeInfo, fileInfo, reader);
-                }
+                        reader.handleFile(new DefaultFileReadInfo().setFile(fileInfo).setRange(updatedRange));
+                        loadRangeChunks(rangeInfo.getStartChunk(), rangeInfo, fileInfo, reader);
+                    }
 
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                reader.handleException(t);
-            }
-        });
+                    return null;
+                })
+                .otherwise(t -> {
+                    reader.handleException(t);
+                    return null;
+                });
 
         return reader;
 
@@ -80,32 +76,25 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
         }
 
         if (reader.isPaused()) {
-            reader.resumeHandler(new Handler<Void>() {
-                @Override
-                public void handle(Void event) {
-                    loadChunks(n, count, fileInfo, reader);
-                }
-            });
+            reader.resumeHandler(event -> loadChunks(n, count, fileInfo, reader));
             return;
         }
 
-        binaryStoreManager.loadChunk(fileInfo.getId(), n, new FutureCallback<ChunkInfo>() {
-            @Override
-            public void onSuccess(ChunkInfo chunkInfo) {
-                if (chunkInfo != null) {
-                    reader.handleData(chunkInfo.getData());
-                    loadChunks(n + 1, count, fileInfo, reader);
-                } else {
-                    reader.handleEnd(FileReader.Result.OK);
-                }
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                logger.error("Error loading chunk", t);
-                reader.handleEnd(FileReader.Result.ERROR);
-            }
-        });
+        binaryStoreManager.loadChunk(fileInfo.getId(), n)
+                .then(chunkInfo -> {
+                    if (chunkInfo != null) {
+                        reader.handleData(chunkInfo.getData());
+                        loadChunks(n + 1, count, fileInfo, reader);
+                    } else {
+                        reader.handleEnd(FileReader.Result.OK);
+                    }
+                    return null;
+                })
+                .otherwise(t -> {
+                    logger.error("Error loading chunk", t);
+                    reader.handleEnd(FileReader.Result.ERROR);
+                    return null;
+                });
     }
 
     private void loadRangeChunks(
@@ -120,25 +109,23 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
             return;
         }
 
-        binaryStoreManager.loadChunk(fileInfo.getId(), n, new FutureCallback<ChunkInfo>() {
-            @Override
-            public void onSuccess(ChunkInfo chunkInfo) {
-                if (chunkInfo == null) {
-                    Throwable t = new Throwable("Error while reading chunk " + n + ". It came back as null.");
+        binaryStoreManager.loadChunk(fileInfo.getId(), n)
+                .then(chunkInfo -> {
+                    if (chunkInfo == null) {
+                        Throwable t = new Throwable("Error while reading chunk " + n + ". It came back as null.");
+                        reader.handleException(t);
+                        reader.handleEnd(FileReader.Result.ERROR);
+                    } else {
+                        reader.handleData(rangeInfo.getRequiredBytesFromChunk(n, chunkInfo.getData()));
+                        loadRangeChunks(n + 1, rangeInfo, fileInfo, reader);
+                    }
+                    return null;
+                })
+                .otherwise(t -> {
                     reader.handleException(t);
                     reader.handleEnd(FileReader.Result.ERROR);
-                } else {
-                    reader.handleData(rangeInfo.getRequiredBytesFromChunk(n, chunkInfo.getData()));
-                    loadRangeChunks(n + 1, rangeInfo, fileInfo, reader);
-                }
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                reader.handleException(t);
-                reader.handleEnd(FileReader.Result.ERROR);
-            }
-        });
+                    return null;
+                });
 
     }
 

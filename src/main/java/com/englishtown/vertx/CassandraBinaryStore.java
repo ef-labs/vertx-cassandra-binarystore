@@ -26,11 +26,12 @@ package com.englishtown.vertx;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricRegistry;
-import com.englishtown.vertx.cassandra.binarystore.*;
+import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
+import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
+import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
+import com.englishtown.vertx.cassandra.binarystore.Metrics;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
-import com.google.common.util.concurrent.FutureCallback;
-import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Future;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
@@ -83,20 +84,20 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         messageCounter = registry.counter(name(Metrics.BASE_NAME, "eb.messages"));
         errorCounter = registry.counter(name(Metrics.BASE_NAME, "eb.errors"));
 
-        starter.run(new Handler<AsyncResult<Void>>() {
-            @Override
-            public void handle(AsyncResult<Void> event) {
-                if (event.succeeded()) {
-                    init(startedResult);
-                } else {
-                    startedResult.setFailure(event.cause());
-                }
-            }
-        });
+        starter.run()
+                .then(aVoid -> {
+                    init();
+                    startedResult.setResult(aVoid);
+                    return null;
+                })
+                .otherwise(t -> {
+                    startedResult.setFailure(t);
+                    return null;
+                });
 
     }
 
-    private void init(final Future<Void> startedResult) {
+    private void init() {
 
         eb = vertx.eventBus();
 
@@ -107,20 +108,15 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
         eb.registerHandler(address, this);
 
         // Message<Buffer> handler to save file chunks
-        eb.registerHandler(address + "/saveChunk", new Handler<Message<Buffer>>() {
-            @Override
-            public void handle(Message<Buffer> message) {
-                messageCounter.inc();
-                saveChunk(message);
-            }
+        eb.registerHandler(address + "/saveChunk", message -> {
+            messageCounter.inc();
+            saveChunk(message);
         });
 
         // Start jmx metric reporter if enabled
         Map<String, Object> values = new HashMap<>();
         values.put("address", address);
         reporter = com.englishtown.vertx.metrics.Utils.create(this, registry, values, config);
-
-        startedResult.setResult(null);
 
     }
 
@@ -203,17 +199,15 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             fileInfo.setMetadata(map);
         }
 
-        binaryStoreManager.storeFile(fileInfo, new FutureCallback<Void>() {
-            @Override
-            public void onSuccess(Void result) {
-                sendOK(message);
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                sendError(message, "Error saving file", t);
-            }
-        });
+        binaryStoreManager.storeFile(fileInfo)
+                .then(aVoid -> {
+                    sendOK(message);
+                    return null;
+                })
+                .otherwise(t -> {
+                    sendError(message, "Error saving file", t);
+                    return null;
+                });
 
     }
 
@@ -279,17 +273,15 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
                 .setNum(n)
                 .setData(data);
 
-        binaryStoreManager.storeChunk(chunkInfo, new FutureCallback<Void>() {
-            @Override
-            public void onSuccess(Void result) {
-                sendOK(message);
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                sendError(message, "Error saving chunk", t);
-            }
-        });
+        binaryStoreManager.storeChunk(chunkInfo)
+                .then(aVoid -> {
+                    sendOK(message);
+                    return null;
+                })
+                .otherwise(t -> {
+                    sendError(message, "Error saving chunk", t);
+                    return null;
+                });
 
     }
 
@@ -300,38 +292,36 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        binaryStoreManager.loadFile(id, new FutureCallback<FileInfo>() {
-            @Override
-            public void onSuccess(FileInfo result) {
-                if (result == null) {
-                    sendError(message, "File " + id.toString() + " does not exist", 404);
-                    return;
-                }
-
-                JsonObject fileInfo = new JsonObject()
-                        .putString("filename", result.getFileName())
-                        .putString("contentType", result.getContentType())
-                        .putNumber("length", result.getLength())
-                        .putNumber("chunkSize", result.getChunkSize())
-                        .putNumber("uploadDate", result.getUploadDate());
-
-                if (result.getMetadata() != null) {
-                    JsonObject metadata = new JsonObject();
-                    for (Map.Entry<String, String> entry : result.getMetadata().entrySet()) {
-                        metadata.putString(entry.getKey(), entry.getValue());
+        binaryStoreManager.loadFile(id)
+                .then(result -> {
+                    if (result == null) {
+                        sendError(message, "File " + id.toString() + " does not exist", 404);
+                        return null;
                     }
-                    fileInfo.putObject("metadata", metadata);
-                }
 
-                // Send file info
-                sendOK(message, fileInfo);
-            }
+                    JsonObject fileInfo = new JsonObject()
+                            .putString("filename", result.getFileName())
+                            .putString("contentType", result.getContentType())
+                            .putNumber("length", result.getLength())
+                            .putNumber("chunkSize", result.getChunkSize())
+                            .putNumber("uploadDate", result.getUploadDate());
 
-            @Override
-            public void onFailure(Throwable t) {
-                sendError(message, "Error reading file", t);
-            }
-        });
+                    if (result.getMetadata() != null) {
+                        JsonObject metadata = new JsonObject();
+                        for (Map.Entry<String, String> entry : result.getMetadata().entrySet()) {
+                            metadata.putString(entry.getKey(), entry.getValue());
+                        }
+                        fileInfo.putObject("metadata", metadata);
+                    }
+
+                    // Send file info
+                    sendOK(message, fileInfo);
+                    return null;
+                })
+                .otherwise(t -> {
+                    sendError(message, "Error reading file", t);
+                    return null;
+                });
 
     }
 
@@ -344,37 +334,32 @@ public class CassandraBinaryStore extends Verticle implements Handler<Message<Js
             return;
         }
 
-        binaryStoreManager.loadChunk(id, n, new FutureCallback<ChunkInfo>() {
-            @Override
-            public void onSuccess(ChunkInfo result) {
-                if (result == null) {
-                    message.reply(new byte[0]);
-                    return;
-                }
+        binaryStoreManager.loadChunk(id, n)
+                .then(result -> {
+                    if (result == null) {
+                        message.reply(new byte[0]);
+                        return null;
+                    }
 
-                boolean reply = jsonObject.getBoolean("reply", false);
-                Handler<Message<JsonObject>> replyHandler = null;
+                    boolean reply = jsonObject.getBoolean("reply", false);
+                    Handler<Message<JsonObject>> replyHandler = null;
 
-                if (reply) {
-                    replyHandler = new Handler<Message<JsonObject>>() {
-                        @Override
-                        public void handle(Message<JsonObject> reply) {
-                            int n = jsonObject.getInteger("n") + 1;
-                            jsonObject.putNumber("n", n);
-                            getChunk(reply, jsonObject);
-                        }
-                    };
-                }
+                    if (reply) {
+                        replyHandler = reply1 -> {
+                            int n1 = jsonObject.getInteger("n") + 1;
+                            jsonObject.putNumber("n", n1);
+                            getChunk(reply1, jsonObject);
+                        };
+                    }
 
-                // TODO: Change to reply with a Buffer instead of a byte[]?
-                message.reply(result.getData(), replyHandler);
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                sendError(message, "Error reading chunk", t);
-            }
-        });
+                    // TODO: Change to reply with a Buffer instead of a byte[]?
+                    message.reply(result.getData(), replyHandler);
+                    return null;
+                })
+                .otherwise(t -> {
+                    sendError(message, "Error reading chunk", t);
+                    return null;
+                });
 
     }
 

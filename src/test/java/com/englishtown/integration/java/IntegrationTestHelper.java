@@ -51,15 +51,12 @@ public class IntegrationTestHelper {
     public static JsonObject onVerticleStart(final Verticle verticle, final Future<Void> startedResult) {
 
         JsonObject config = loadConfig();
-        verticle.getContainer().deployVerticle(CassandraBinaryStore.class.getName(), config, new Handler<AsyncResult<String>>() {
-            @Override
-            public void handle(AsyncResult<String> result) {
-                if (result.succeeded()) {
-                    startedResult.setResult(null);
-                    verticle.start();
-                } else {
-                    startedResult.setFailure(result.cause());
-                }
+        verticle.getContainer().deployVerticle(CassandraBinaryStore.class.getName(), config, result -> {
+            if (result.succeeded()) {
+                startedResult.setResult(null);
+                verticle.start();
+            } else {
+                startedResult.setFailure(result.cause());
             }
         });
 

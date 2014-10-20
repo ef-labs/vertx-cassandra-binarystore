@@ -3,11 +3,15 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
-import com.englishtown.promises.*;
+import com.englishtown.promises.Promise;
+import com.englishtown.promises.When;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStatements;
+import com.englishtown.vertx.cassandra.keyspacebuilder.CreateKeyspace;
+import com.englishtown.vertx.cassandra.keyspacebuilder.KeyspaceBuilder;
 import com.englishtown.vertx.cassandra.promises.WhenCassandraSession;
+import com.englishtown.vertx.cassandra.tablebuilder.PrimaryKeyType;
+import com.englishtown.vertx.cassandra.tablebuilder.TableBuilder;
 import com.google.common.base.Strings;
-import com.google.common.util.concurrent.FutureCallback;
 
 import javax.inject.Inject;
 import java.util.ArrayList;
@@ -22,6 +26,7 @@ import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
 
     private final WhenCassandraSession session;
+    private final When when;
     private boolean isInitialized;
     private String keyspace;
     private PreparedStatement storeChunk;
@@ -31,8 +36,9 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
 
 
     @Inject
-    public DefaultBinaryStoreStatements(WhenCassandraSession session) {
+    public DefaultBinaryStoreStatements(WhenCassandraSession session, When when) {
         this.session = session;
+        this.when = when;
     }
 
     @Override
@@ -41,58 +47,33 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
     }
 
     @Override
-    public void init(final String keyspace, final FutureCallback<Void> callback) {
+    public Promise<Void> init(final String keyspace) {
 
         if (Strings.isNullOrEmpty(keyspace)) {
-            callback.onFailure(new RuntimeException("keyspace was missing"));
-            return;
+            return when.reject(new RuntimeException("keyspace was missing"));
         }
 
         this.keyspace = keyspace;
 
-        ensureKeyspace().then(
-                new FulfilledRunnable<KeyspaceMetadata>() {
-                    @Override
-                    public Promise<KeyspaceMetadata> run(KeyspaceMetadata kmd) {
+        return ensureKeyspace()
+                .then(kmd -> {
+                    List<Promise<ResultSet>> promises = new ArrayList<>();
+                    ensureTables(promises, kmd);
 
-                        When<ResultSet> when = new When<>();
-                        List<Promise<ResultSet>> promises = new ArrayList<>();
-
-                        ensureTables(promises, kmd);
-
-                        if (promises.size() == 0) {
-                            initPreparedStatements(callback);
-                            return null;
-                        }
-
-                        when.all(promises).then(
-                                new FulfilledRunnable<List<? extends ResultSet>>() {
-                                    @Override
-                                    public Promise<List<? extends ResultSet>> run(List<? extends ResultSet> resultSets) {
-                                        initPreparedStatements(callback);
-                                        return null;
-                                    }
-                                },
-                                new RejectedRunnable<List<? extends ResultSet>>() {
-                                    @Override
-                                    public Promise<List<? extends ResultSet>> run(Value<List<? extends ResultSet>> listValue) {
-                                        callback.onFailure(listValue.getCause());
-                                        return null;
-                                    }
-                                }
-                        );
-
-                        return null;
+                    if (promises.size() == 0) {
+                        return initPreparedStatements();
                     }
-                },
-                new RejectedRunnable<KeyspaceMetadata>() {
-                    @Override
-                    public Promise<KeyspaceMetadata> run(Value<KeyspaceMetadata> value) {
-                        callback.onFailure(value.getCause());
-                        return null;
-                    }
-                }
-        );
+
+                    return when.all(promises)
+                            .then(resultSets -> {
+                                return initPreparedStatements();
+                            });
+
+                })
+                .then(aVoid -> {
+                    isInitialized = true;
+                    return null;
+                });
 
     }
 
@@ -145,9 +126,7 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
         return this;
     }
 
-    Promise<KeyspaceMetadata> ensureKeyspace() {
-
-        When<KeyspaceMetadata> when = new When<>();
+    private Promise<KeyspaceMetadata> ensureKeyspace() {
 
         final Metadata metadata = session.getMetadata();
 
@@ -169,75 +148,58 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
             }
         }
 
-        StringBuilder replication = new StringBuilder();
+        CreateKeyspace create = KeyspaceBuilder
+                .create(keyspace)
+                .ifNotExists();
 
         if (count > 0) {
-            replication.append("= {'class':'NetworkTopologyStrategy', '")
-                    .append(dc)
-                    .append("':")
-                    .append((count > 2 ? 3 : count == 2 ? 2 : 1))
-                    .append("};");
+            create.networkTopologyStrategy()
+                    .dc(dc, (count > 2 ? 3 : count == 2 ? 2 : 1));
         } else {
-            replication.append("= {'class':'SimpleStrategy', 'replication_factor':3};");
+            create.simpleStrategy(1);
         }
 
-        final Deferred<KeyspaceMetadata> d = when.defer();
-        String cql = "CREATE KEYSPACE IF NOT EXISTS " + keyspace + " WITH replication " + replication.toString();
+        return session.executeAsync(create)
+                .then(value -> {
+                    return when.resolve(metadata.getKeyspace(keyspace));
+                });
 
-        session.executeAsync(new SimpleStatement(cql)).then(
-                new FulfilledRunnable<ResultSet>() {
-                    @Override
-                    public Promise<ResultSet> run(ResultSet value) {
-                        d.getResolver().resolve(metadata.getKeyspace(keyspace));
-                        return null;
-                    }
-                },
-                new RejectedRunnable<ResultSet>() {
-                    @Override
-                    public Promise<ResultSet> run(Value<ResultSet> value) {
-                        d.getResolver().reject(value.getCause());
-                        return null;
-                    }
-                }
-        );
-
-        return d.getPromise();
     }
 
-    void ensureTables(List<Promise<ResultSet>> promises, KeyspaceMetadata kmd) {
+    private void ensureTables(List<Promise<ResultSet>> promises, KeyspaceMetadata kmd) {
 
         if (kmd == null || kmd.getTable("files") == null) {
-            String cql =
-                    "CREATE TABLE IF NOT EXISTS " + keyspace + ".files (" +
-                            "id uuid PRIMARY KEY," +
-                            "filename text," +
-                            "contentType text," +
-                            "chunkSize int," +
-                            "length bigint," +
-                            "uploadDate bigint," +
-                            "metadata map<text, text>" +
-                            ");";
+            Statement statement = TableBuilder.create(keyspace, "files")
+                    .ifNotExists()
+                    .column("id", "uuid")
+                    .column("filename", "text")
+                    .column("contentType", "text")
+                    .column("chunkSize", "int")
+                    .column("length", "bigint")
+                    .column("uploadDate", "bigint")
+                    .column("metadata", "map<text, text>")
+                    .primaryKey("id");
 
-            promises.add(session.executeAsync(new SimpleStatement(cql)));
+            promises.add(session.executeAsync(statement));
         }
 
         if (kmd == null || kmd.getTable("chunks") == null) {
-            String cql =
-                    "CREATE TABLE IF NOT EXISTS " + keyspace + ".chunks (" +
-                            "files_id uuid," +
-                            "n int," +
-                            "data blob," +
-                            "PRIMARY KEY ((files_id, n))" +
-                            ");";
+            Statement statement = TableBuilder.create(keyspace, "chunks")
+                    .ifNotExists()
+                    .column("files_id", "uuid")
+                    .column("n", "int")
+                    .column("data", "blob")
+                    .primaryKey("files_id", PrimaryKeyType.PARTITIONING)
+                    .primaryKey("n", PrimaryKeyType.PARTITIONING);
 
-            promises.add(session.executeAsync(new SimpleStatement(cql)));
+            promises.add(session.executeAsync(statement));
         }
 
     }
 
-    public void initPreparedStatements(final FutureCallback<Void> callback) {
+    public Promise<Void> initPreparedStatements() {
 
-        List<Promise<PreparedStatement>> promises = new ArrayList<>();
+        List<Promise<Void>> promises = new ArrayList<>();
 
         RegularStatement query = QueryBuilder
                 .insertInto(keyspace, "files")
@@ -249,7 +211,11 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
                 .value("contentType", bindMarker())
                 .value("metadata", bindMarker());
 
-        promises.add(session.prepareAsync(query));
+        promises.add(session.prepareAsync(query)
+                .then(ps -> {
+                    setStoreFile(ps);
+                    return null;
+                }));
 
         query = QueryBuilder
                 .select()
@@ -257,7 +223,11 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
                 .from(keyspace, "files")
                 .where(eq("id", bindMarker()));
 
-        promises.add(session.prepareAsync(query));
+        promises.add(session.prepareAsync(query).then(ps -> {
+            setLoadFile(ps);
+            return null;
+        }));
+
 
         query = QueryBuilder
                 .insertInto(keyspace, "chunks")
@@ -265,7 +235,10 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
                 .value("n", bindMarker())
                 .value("data", bindMarker());
 
-        promises.add(session.prepareAsync(query));
+        promises.add(session.prepareAsync(query).then(ps -> {
+            setStoreChunk(ps);
+            return null;
+        }));
 
         query = QueryBuilder
                 .select("data")
@@ -273,31 +246,12 @@ public class DefaultBinaryStoreStatements implements BinaryStoreStatements {
                 .where(eq("files_id", bindMarker()))
                 .and(eq("n", bindMarker()));
 
-        promises.add(session.prepareAsync(query));
+        promises.add(session.prepareAsync(query).then(ps -> {
+            setLoadChunk(ps);
+            return null;
+        }));
 
-        When<PreparedStatement> when = new When<>();
-        when.all(promises).then(
-                new FulfilledRunnable<List<? extends PreparedStatement>>() {
-                    @Override
-                    public Promise<List<? extends PreparedStatement>> run(List<? extends PreparedStatement> preparedStatements) {
-                        setStoreFile(preparedStatements.get(0));
-                        setLoadFile(preparedStatements.get(1));
-                        setStoreChunk(preparedStatements.get(2));
-                        setLoadChunk(preparedStatements.get(3));
-
-                        isInitialized = true;
-                        callback.onSuccess(null);
-                        return null;
-                    }
-                },
-                new RejectedRunnable<List<? extends PreparedStatement>>() {
-                    @Override
-                    public Promise<List<? extends PreparedStatement>> run(Value<List<? extends PreparedStatement>> listValue) {
-                        callback.onFailure(listValue.getCause());
-                        return null;
-                    }
-                }
-        );
+        return when.all(promises).then(voids -> null);
     }
 
 }

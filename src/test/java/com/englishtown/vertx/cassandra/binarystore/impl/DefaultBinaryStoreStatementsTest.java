@@ -3,11 +3,11 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
 import com.datastax.driver.core.policies.Policies;
-import com.englishtown.promises.FulfilledRunnable;
+import com.englishtown.promises.HandlerState;
 import com.englishtown.promises.Promise;
-import com.englishtown.promises.RejectedRunnable;
+import com.englishtown.promises.When;
+import com.englishtown.promises.WhenFactory;
 import com.englishtown.vertx.cassandra.promises.WhenCassandraSession;
-import com.google.common.util.concurrent.FutureCallback;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -15,6 +15,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
+
+import java.util.function.Function;
 
 import static org.junit.Assert.*;
 import static org.mockito.Matchers.any;
@@ -45,37 +47,43 @@ public class DefaultBinaryStoreStatementsTest {
     @Mock
     LoadBalancingPolicy lbPolicy;
     @Mock
-    FutureCallback<Void> callback;
-    @Mock
     Metadata metadata;
     @Mock
-    Promise<ResultSet> resultSetPromise;
+    ResultSet resultSet;
     @Captor
-    ArgumentCaptor<FulfilledRunnable<ResultSet>> fulfilledCaptor;
-    @Captor
-    ArgumentCaptor<RejectedRunnable<ResultSet>> rejectedCaptor;
+    ArgumentCaptor<Function<ResultSet, Promise<ResultSet>>> fulfilledCaptor;
 
     String keyspace = "test.keyspace";
+    When when;
 
     @Before
     public void setUp() throws Exception {
+        when = WhenFactory.createSync();
+
         when(session.getMetadata()).thenReturn(metadata);
-        when(session.executeAsync(any(RegularStatement.class))).thenReturn(resultSetPromise).thenReturn(null);
+        when(session.executeAsync(any(RegularStatement.class))).thenReturn(when.resolve(resultSet));
         when(session.getCluster()).thenReturn(cluster);
         when(cluster.getConfiguration()).thenReturn(configuration);
         when(configuration.getPolicies()).thenReturn(policies);
         when(policies.getLoadBalancingPolicy()).thenReturn(lbPolicy);
         when(lbPolicy.distance(any(Host.class))).thenReturn(HostDistance.LOCAL);
+
+        when(session.prepareAsync(any(RegularStatement.class)))
+                .thenReturn(when.resolve(storeFile))
+                .thenReturn(when.resolve(loadFile))
+                .thenReturn(when.resolve(storeChunk))
+                .thenReturn(when.resolve(loadChunk));
+
     }
 
     @Test
     public void simpleStatementsRetentionTest() throws Exception {
 
         // Initialise
-        DefaultBinaryStoreStatements dbss = new DefaultBinaryStoreStatements(session);
+        DefaultBinaryStoreStatements dbss = new DefaultBinaryStoreStatements(session, when);
 
         // When we set our various fields on DefaultBinaryStoreStatements
-        dbss.init(keyspace, callback);
+        dbss.init(keyspace);
         dbss.setLoadChunk(loadChunk);
         dbss.setLoadFile(loadFile);
         dbss.setStoreChunk(storeChunk);
@@ -93,13 +101,11 @@ public class DefaultBinaryStoreStatementsTest {
     @Test
     public void testInit() throws Exception {
 
-        DefaultBinaryStoreStatements dbss = new DefaultBinaryStoreStatements(session);
+        DefaultBinaryStoreStatements dbss = new DefaultBinaryStoreStatements(session, when);
         assertFalse(dbss.isInitialized());
 
-        dbss.init(keyspace, callback);
-
-        verify(resultSetPromise).then(fulfilledCaptor.capture(), rejectedCaptor.capture());
-        fulfilledCaptor.getValue().run(null);
+        Promise<Void> p = dbss.init(keyspace);
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
 
         verify(session, times(3)).executeAsync(any(SimpleStatement.class));
         verify(session, times(4)).prepareAsync(any(RegularStatement.class));

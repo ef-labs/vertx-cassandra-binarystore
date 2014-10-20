@@ -26,17 +26,16 @@ package com.englishtown.integration.java;
 import com.englishtown.vertx.CassandraBinaryStore;
 import org.junit.Test;
 import org.vertx.java.core.Future;
-import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.EventBus;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.testtools.TestVerticle;
+import org.vertx.testtools.VertxAssert;
 
 import java.io.UnsupportedEncodingException;
 import java.util.UUID;
 
-import static org.vertx.testtools.VertxAssert.assertEquals;
 import static org.vertx.testtools.VertxAssert.testComplete;
 
 /**
@@ -52,12 +51,7 @@ public class SaveChunkIntegrationTest extends TestVerticle {
 
         Buffer message = new Buffer();
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "message body is empty");
-            }
-        });
+        eventBus.send(address, message, (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "message body is empty"));
 
     }
 
@@ -70,12 +64,7 @@ public class SaveChunkIntegrationTest extends TestVerticle {
         buffer.appendBytes(invalid);
         buffer.appendBytes(new byte[10]);
 
-        eventBus.send(address, buffer, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "error parsing buffer message.  see the documentation for the correct format");
-            }
-        });
+        eventBus.send(address, buffer, (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "error parsing buffer message.  see the documentation for the correct format"));
 
     }
 
@@ -84,12 +73,7 @@ public class SaveChunkIntegrationTest extends TestVerticle {
 
         Buffer message = getMessage(new JsonObject(), new byte[0]);
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "chunk data is missing");
-            }
-        });
+        eventBus.send(address, message, (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "chunk data is missing"));
 
     }
 
@@ -98,12 +82,7 @@ public class SaveChunkIntegrationTest extends TestVerticle {
 
         Buffer message = getMessage(new JsonObject(), new byte[10]);
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "files_id must be specified");
-            }
-        });
+        eventBus.send(address, message, (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "files_id must be specified"));
 
     }
 
@@ -114,12 +93,7 @@ public class SaveChunkIntegrationTest extends TestVerticle {
         JsonObject jsonObject = new JsonObject().putString("files_id", id.toString());
         Buffer message = getMessage(jsonObject, new byte[10]);
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "n must be specified");
-            }
-        });
+        eventBus.send(address, message, (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "n must be specified"));
 
     }
 
@@ -135,21 +109,15 @@ public class SaveChunkIntegrationTest extends TestVerticle {
 
         Buffer message = getMessage(jsonObject, new byte[10]);
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                assertEquals("ok", message.body().getString("status"));
+        eventBus.send(address, message, (Message<JsonObject> reply1) -> {
+            VertxAssert.assertEquals("ok", reply1.body().getString("status"));
 
-                jsonObject.putString("action", "getChunk");
+            jsonObject.putString("action", "getChunk");
 
-                eventBus.send(CassandraBinaryStore.DEFAULT_ADDRESS, jsonObject, new Handler<Message<byte[]>>() {
-                    @Override
-                    public void handle(Message<byte[]> reply) {
-                        assertEquals(10, reply.body().length);
-                        testComplete();
-                    }
-                });
-            }
+            eventBus.send(CassandraBinaryStore.DEFAULT_ADDRESS, jsonObject, (Message<byte[]> reply2) -> {
+                VertxAssert.assertEquals(10, reply2.body().length);
+                testComplete();
+            });
         });
 
     }

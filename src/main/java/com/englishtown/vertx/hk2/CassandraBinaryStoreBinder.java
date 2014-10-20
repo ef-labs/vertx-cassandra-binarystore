@@ -6,6 +6,7 @@ import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreReader
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreStatements;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreWriter;
 import com.englishtown.vertx.cassandra.hk2.HK2WhenCassandraBinder;
+import com.englishtown.vertx.promises.hk2.HK2WhenBinder;
 import org.glassfish.hk2.utilities.binding.AbstractBinder;
 
 import javax.inject.Singleton;
@@ -22,7 +23,7 @@ public class CassandraBinaryStoreBinder extends AbstractBinder {
     @Override
     protected void configure() {
 
-        install(new MetricsBinder(), new HK2WhenCassandraBinder());
+        install(new MetricsBinder(), new HK2WhenCassandraBinder(), new HK2WhenBinder());
 
         bind(BinaryStoreStarter.class).to(BinaryStoreStarter.class);
         bind(DefaultBinaryStoreManager.class).to(BinaryStoreManager.class).in(Singleton.class);

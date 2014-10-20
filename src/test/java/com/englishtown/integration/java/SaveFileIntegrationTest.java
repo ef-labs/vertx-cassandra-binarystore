@@ -31,6 +31,7 @@ import org.vertx.java.core.eventbus.EventBus;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.testtools.TestVerticle;
+import org.vertx.testtools.VertxAssert;
 
 import java.util.UUID;
 
@@ -49,12 +50,7 @@ public class SaveFileIntegrationTest extends TestVerticle {
     @Test
     public void testSaveFile_Empty_Json() {
 
-        eventBus.send(address, new JsonObject(), new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "action must be specified");
-            }
-        });
+        eventBus.send(address, new JsonObject(), (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "action must be specified"));
 
     }
 
@@ -64,12 +60,7 @@ public class SaveFileIntegrationTest extends TestVerticle {
         JsonObject message = new JsonObject()
                 .putString("action", "saveFile");
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "id must be specified");
-            }
-        });
+        eventBus.send(address, message, (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "id must be specified"));
 
     }
 
@@ -80,12 +71,7 @@ public class SaveFileIntegrationTest extends TestVerticle {
                 .putString("action", "saveFile")
                 .putString("id", UUID.randomUUID().toString());
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "length must be specified");
-            }
-        });
+        eventBus.send(address, message, (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "length must be specified"));
 
     }
 
@@ -97,12 +83,7 @@ public class SaveFileIntegrationTest extends TestVerticle {
                 .putString("id", UUID.randomUUID().toString())
                 .putNumber("length", 1024 * 1024);
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                IntegrationTestHelper.verifyErrorReply(message, "chunkSize must be specified");
-            }
-        });
+        eventBus.send(address, message, (Message<JsonObject> reply) -> IntegrationTestHelper.verifyErrorReply(reply, "chunkSize must be specified"));
 
     }
 
@@ -126,12 +107,9 @@ public class SaveFileIntegrationTest extends TestVerticle {
                 .putString("contentType", contentType)
                 .putObject("metadata", new JsonObject().putString("additional", "info"));
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> message) {
-                assertEquals("ok", message.body().getString("status"));
-                testComplete();
-            }
+        eventBus.send(address, message, (Message<JsonObject> reply) -> {
+            VertxAssert.assertEquals("ok", reply.body().getString("status"));
+            testComplete();
         });
 
     }

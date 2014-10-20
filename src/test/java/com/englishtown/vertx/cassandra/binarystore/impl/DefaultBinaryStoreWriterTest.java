@@ -1,5 +1,9 @@
 package com.englishtown.vertx.cassandra.binarystore.impl;
 
+import com.englishtown.promises.HandlerState;
+import com.englishtown.promises.Promise;
+import com.englishtown.promises.When;
+import com.englishtown.promises.WhenFactory;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
 import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.FileInfo;
@@ -32,13 +36,7 @@ public class DefaultBinaryStoreWriterTest {
     BinaryStoreManager binaryStoreManager;
     @Mock
     ReadStream<AsyncFile> readStream;
-    @Mock
-    FutureCallback<FileInfo> callback;
 
-    @Captor
-    ArgumentCaptor<FutureCallback<Void>> chunkFutureCallbackArgumentCaptor;
-    @Captor
-    ArgumentCaptor<FutureCallback<Void>> fileFutureCallbackArgumentCaptor;
     @Captor
     ArgumentCaptor<Handler<Buffer>> dataHandlerCaptor;
     @Captor
@@ -48,6 +46,7 @@ public class DefaultBinaryStoreWriterTest {
     @Captor
     ArgumentCaptor<FileInfo> fileInfoArgumentCaptor;
 
+    When when;
     UUID uuid = UUID.fromString("739a6466-adf8-11e3-aca6-425861b86ab6");
     DefaultBinaryStoreWriter dbsw;
     DefaultFileInfo fileInfo;
@@ -58,7 +57,8 @@ public class DefaultBinaryStoreWriterTest {
 
     @Before
     public void setUp() throws Exception {
-        dbsw = new DefaultBinaryStoreWriter(binaryStoreManager);
+        when = WhenFactory.createSync();
+        dbsw = new DefaultBinaryStoreWriter(binaryStoreManager, when);
         fileInfo = createFileInfo();
 
 //        verify(readStream).exceptionHandler(exceptionHandlerCaptor.capture());
@@ -72,7 +72,7 @@ public class DefaultBinaryStoreWriterTest {
         fileInfo.setLength(buffer.length());
 
         // When we call the write method
-        dbsw.write(fileInfo, readStream, callback);
+        Promise<FileInfo> p = dbsw.write(fileInfo, readStream);
         verify(readStream).dataHandler(dataHandlerCaptor.capture());
         verify(readStream).endHandler(endHandlerCaptor.capture());
 
@@ -86,15 +86,13 @@ public class DefaultBinaryStoreWriterTest {
         endHandlerCaptor.getValue().handle(null);
 
         // We expect the binary store manager to be called to write our chunk and then our file
-        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo), chunkFutureCallbackArgumentCaptor.capture());
-        verify(binaryStoreManager).storeFile(eq(fileInfo), fileFutureCallbackArgumentCaptor.capture());
-
-        // When we call the success method on both of those requests
-        chunkFutureCallbackArgumentCaptor.getValue().onSuccess(null);
-        fileFutureCallbackArgumentCaptor.getValue().onSuccess(null);
+        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo));
+        verify(binaryStoreManager).storeFile(eq(fileInfo));
 
         // Then we expect our main callback to have its success method called with our file info object
-        verify(callback).onSuccess(eq(fileInfo));
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
+        assertEquals(fileInfo, p.inspect().getValue());
+
     }
 
     @SuppressWarnings("unchecked")
@@ -112,7 +110,7 @@ public class DefaultBinaryStoreWriterTest {
         ChunkInfo expectedChunkInfo2 = new DefaultChunkInfo().setId(uuid).setNum(1).setData(buffer.getBytes(100, buffer.length()));
 
         // Then call the write method
-        dbsw.write(fileInfo, readStream, callback);
+        Promise<FileInfo> p = dbsw.write(fileInfo, readStream);
         verify(readStream).dataHandler(dataHandlerCaptor.capture());
         verify(readStream).endHandler(endHandlerCaptor.capture());
 
@@ -120,24 +118,19 @@ public class DefaultBinaryStoreWriterTest {
         dataHandlerCaptor.getValue().handle(buffer);
 
         // We then expect binary store manager to be called with the expected chunk info
-        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo), chunkFutureCallbackArgumentCaptor.capture());
-
-        // When we call the success method on the binary store callback
-        chunkFutureCallbackArgumentCaptor.getValue().onSuccess(null);
+        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo));
 
         // and we call the end handler
         endHandlerCaptor.getValue().handle(null);
 
         // We expect binary store manager to be called to store the final chunk and to store the file
-        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo2), chunkFutureCallbackArgumentCaptor.capture());
-        verify(binaryStoreManager).storeFile(eq(fileInfo), fileFutureCallbackArgumentCaptor.capture());
-
-        // When we call the success method on both of those requests
-        chunkFutureCallbackArgumentCaptor.getValue().onSuccess(null);
-        fileFutureCallbackArgumentCaptor.getValue().onSuccess(null);
+        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo2));
+        verify(binaryStoreManager).storeFile(eq(fileInfo));
 
         // Then we expect our main callback to have its success method called with our file info object
-        verify(callback).onSuccess(eq(fileInfo));
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
+        assertEquals(fileInfo, p.inspect().getValue());
+
     }
 
     @SuppressWarnings("unchecked")
@@ -148,7 +141,7 @@ public class DefaultBinaryStoreWriterTest {
         for (int i = 0; i < names.length; i++) {
             BinaryStoreManager binaryStoreManager = mock(BinaryStoreManager.class);
 
-            dbsw = new DefaultBinaryStoreWriter(binaryStoreManager);
+            dbsw = new DefaultBinaryStoreWriter(binaryStoreManager, when);
             fileInfo = createFileInfo();
             fileInfo.setFileName(names[i]);
             fileInfo.setContentType(null);
@@ -157,10 +150,9 @@ public class DefaultBinaryStoreWriterTest {
             FutureCallback<FileInfo> callback = mock(FutureCallback.class);
             ArgumentCaptor<Handler> endHandlerCaptor = ArgumentCaptor.forClass(Handler.class);
             ArgumentCaptor<FileInfo> fileInfoArgumentCaptor = ArgumentCaptor.forClass(FileInfo.class);
-            ArgumentCaptor<FutureCallback> fileFutureCallbackArgumentCaptor = ArgumentCaptor.forClass(FutureCallback.class);
 
             // We try and write and capture the end handler
-            dbsw.write(fileInfo, readStream, callback);
+            Promise<FileInfo> p = dbsw.write(fileInfo, readStream);
             verify(readStream).endHandler(endHandlerCaptor.capture());
 
             // We then call the end handler
@@ -168,7 +160,7 @@ public class DefaultBinaryStoreWriterTest {
 
             // and expect binarystoremanager to have the storefile method called with a fileinfo object that has the
             // correct contentype on it.
-            verify(binaryStoreManager).storeFile(fileInfoArgumentCaptor.capture(), fileFutureCallbackArgumentCaptor.capture());
+            verify(binaryStoreManager).storeFile(fileInfoArgumentCaptor.capture());
             assertEquals(types[i], fileInfoArgumentCaptor.getValue().getContentType());
         }
     }

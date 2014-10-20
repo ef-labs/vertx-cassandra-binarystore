@@ -1,6 +1,6 @@
 package com.englishtown.vertx.cassandra.binarystore;
 
-import com.google.common.util.concurrent.FutureCallback;
+import com.englishtown.promises.Promise;
 
 import java.util.UUID;
 
@@ -9,12 +9,12 @@ import java.util.UUID;
  */
 public interface BinaryStoreManager {
 
-    void storeFile(FileInfo fileInfo, FutureCallback<Void> callback);
+    Promise<Void> storeFile(FileInfo fileInfo);
 
-    void storeChunk(ChunkInfo chunkInfo, FutureCallback<Void> callback);
+    Promise<Void> storeChunk(ChunkInfo chunkInfo);
 
-    void loadFile(UUID id, FutureCallback<FileInfo> callback);
+    Promise<FileInfo> loadFile(UUID id);
 
-    void loadChunk(UUID id, int n, FutureCallback<ChunkInfo> callback);
+    Promise<ChunkInfo> loadChunk(UUID id, int n);
 
 }

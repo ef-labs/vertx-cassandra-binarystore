@@ -2,11 +2,11 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 
 import com.codahale.metrics.MetricRegistry;
 import com.datastax.driver.core.BoundStatement;
-import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
-import com.englishtown.vertx.cassandra.CassandraSession;
+import com.englishtown.promises.Promise;
+import com.englishtown.promises.When;
 import com.englishtown.vertx.cassandra.binarystore.*;
-import com.google.common.util.concurrent.FutureCallback;
+import com.englishtown.vertx.cassandra.promises.WhenCassandraSession;
 
 import javax.inject.Inject;
 import java.nio.ByteBuffer;
@@ -18,24 +18,26 @@ import java.util.UUID;
 public class DefaultBinaryStoreManager implements BinaryStoreManager {
 
     private final MetricRegistry registry;
+    private final When when;
 
-    private final CassandraSession session;
+    private final WhenCassandraSession session;
     private final BinaryStoreStatements statements;
     private final Metrics fileMetrics;
     private final Metrics chunkMetrics;
 
     @Inject
-    public DefaultBinaryStoreManager(CassandraSession session, BinaryStoreStatements statements, MetricRegistry registry) {
+    public DefaultBinaryStoreManager(WhenCassandraSession session, BinaryStoreStatements statements, MetricRegistry registry, When when) {
         this.session = session;
         this.statements = statements;
         this.registry = registry;
+        this.when = when;
 
         this.fileMetrics = new Metrics(registry, "files");
         this.chunkMetrics = new Metrics(registry, "chunks");
     }
 
     @Override
-    public void storeFile(FileInfo fileInfo, final FutureCallback<Void> callback) {
+    public Promise<Void> storeFile(FileInfo fileInfo) {
 
         final Metrics.Context context = fileMetrics.timeWrite();
 
@@ -51,26 +53,19 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
                         fileInfo.getMetadata()
                 );
 
-        session.executeAsync(insert, new FutureCallback<ResultSet>() {
-            @Override
-            public void onSuccess(ResultSet result) {
-                if (context != null) context.stop();
-
-                callback.onSuccess(null);
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                if (context != null) context.error();
-
-                callback.onFailure(t);
-            }
-        });
+        return session.executeAsync(insert)
+                .then(rs -> {
+                    context.stop();
+                    return null;
+                }).otherwise(t -> {
+                    context.error();
+                    return when.reject(t);
+                });
 
     }
 
     @Override
-    public void storeChunk(ChunkInfo chunkInfo, final FutureCallback<Void> callback) {
+    public Promise<Void> storeChunk(ChunkInfo chunkInfo) {
 
         final Metrics.Context context = chunkMetrics.timeWrite();
 
@@ -82,41 +77,33 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
                         ByteBuffer.wrap(chunkInfo.getData())
                 );
 
-        session.executeAsync(insert, new FutureCallback<ResultSet>() {
-            @Override
-            public void onSuccess(ResultSet result) {
-                if (context != null) context.stop();
-
-                callback.onSuccess(null);
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                if (context != null) context.error();
-
-                callback.onFailure(t);
-            }
-        });
+        return session.executeAsync(insert)
+                .then(rs -> {
+                    context.stop();
+                    return null;
+                })
+                .otherwise(t -> {
+                    context.error();
+                    return when.reject(t);
+                });
 
     }
 
     @Override
-    public void loadFile(final UUID id, final FutureCallback<FileInfo> callback) {
+    public Promise<FileInfo> loadFile(final UUID id) {
 
-        final Metrics.Context context = fileMetrics.timeRead();
-
+        Metrics.Context context = fileMetrics.timeRead();
         BoundStatement select = statements.getLoadFile().bind(id);
-        session.executeAsync(select, new FutureCallback<ResultSet>() {
-            @Override
-            public void onSuccess(ResultSet result) {
-                Row row = result.one();
-                if (row == null) {
-                    context.stop();
-                    callback.onSuccess(null);
-                    return;
-                }
 
-                try {
+        return session.executeAsync(select)
+                .then(result -> {
+                    Row row = result.one();
+
+                    if (row == null) {
+                        context.stop();
+                        return when.resolve(null);
+                    }
+
                     DefaultFileInfo fileInfo = new DefaultFileInfo()
                             .setId(id)
                             .setFileName(row.getString("filename"))
@@ -127,63 +114,48 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
                             .setMetadata(row.getMap("metadata", String.class, String.class));
 
                     context.stop();
-                    callback.onSuccess(fileInfo);
+                    return when.resolve(fileInfo);
 
-                } catch (Throwable t) {
+                })
+                .otherwise(t -> {
                     context.error();
-                    callback.onFailure(t);
-                }
-            }
+                    return when.reject(t);
+                });
 
-            @Override
-            public void onFailure(Throwable t) {
-                context.error();
-                callback.onFailure(t);
-            }
-        });
     }
 
     @Override
-    public void loadChunk(final UUID id, final int n, final FutureCallback<ChunkInfo> callback) {
+    public Promise<ChunkInfo> loadChunk(final UUID id, final int n) {
 
-        final Metrics.Context context = chunkMetrics.timeRead();
-
+        Metrics.Context context = chunkMetrics.timeRead();
         BoundStatement select = statements.getLoadChunk().bind(id, n);
-        session.executeAsync(select, new FutureCallback<ResultSet>() {
-            @Override
-            public void onSuccess(ResultSet result) {
-                Row row = result.one();
-                if (row == null) {
-                    context.stop();
-                    callback.onSuccess(null);
-                    return;
-                }
 
-                try {
-                    DefaultChunkInfo chunkInfo = new DefaultChunkInfo()
-                            .setId(id)
-                            .setNum(n);
+        return session.executeAsync(select)
+                .then(result -> {
+                    Row row = result.one();
+
+                    if (row == null) {
+                        context.stop();
+                        return when.resolve(null);
+                    }
 
                     ByteBuffer bb = row.getBytes("data");
                     byte[] data = new byte[bb.remaining()];
                     bb.get(data);
-                    chunkInfo.setData(data);
+
+                    DefaultChunkInfo chunkInfo = new DefaultChunkInfo()
+                            .setId(id)
+                            .setNum(n)
+                            .setData(data);
 
                     context.stop();
-                    callback.onSuccess(chunkInfo);
+                    return when.resolve(chunkInfo);
 
-                } catch (Throwable t) {
+                })
+                .otherwise(t -> {
                     context.error();
-                    callback.onFailure(t);
-                }
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                context.error();
-                callback.onFailure(t);
-            }
-        });
+                    return when.reject(t);
+                });
 
     }
 }

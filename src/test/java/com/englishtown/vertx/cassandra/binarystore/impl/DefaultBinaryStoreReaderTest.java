@@ -1,7 +1,7 @@
 package com.englishtown.vertx.cassandra.binarystore.impl;
 
+import com.englishtown.promises.Promise;
 import com.englishtown.vertx.cassandra.binarystore.*;
-import com.google.common.util.concurrent.FutureCallback;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -15,6 +15,7 @@ import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Container;
 
 import java.util.UUID;
+import java.util.function.Function;
 
 import static com.englishtown.vertx.cassandra.binarystore.FileReader.Result;
 import static org.junit.Assert.assertEquals;
@@ -41,24 +42,38 @@ public class DefaultBinaryStoreReaderTest {
     Handler<FileReadInfo> fileHandler;
     @Mock
     Handler<Throwable> exceptionHandler;
+    @Mock
+    Promise<FileInfo> fileInfoPromise;
+    @Mock
+    Promise<ChunkInfo> chunkInfoPromise;
 
     @Captor
-    ArgumentCaptor<FutureCallback<FileInfo>> loadFileArgumentCaptor;
+    ArgumentCaptor<Function<FileInfo, Promise<FileInfo>>> fileInfoFulfilledCaptor;
     @Captor
-    ArgumentCaptor<FutureCallback<ChunkInfo>> loadChunkArgumentCaptor;
+    ArgumentCaptor<Function<Throwable, Promise<FileInfo>>> fileInfoRejectedCaptor;
+    @Captor
+    ArgumentCaptor<Function<ChunkInfo, Promise<ChunkInfo>>> chunkInfoFulfilledCaptor;
+    @Captor
+    ArgumentCaptor<Function<Throwable, Promise<ChunkInfo>>> chunkInfoRejectedCaptor;
     @Captor
     ArgumentCaptor<DefaultFileReadInfo> fileHandlerArgumentCaptor;
 
-    UUID uuid = UUID.fromString("739a6466-adf8-11e3-aca6-425861b86ab6");
-    DefaultBinaryStoreReader dbsr;
-    FileInfo fileInfo;
+    private UUID uuid = UUID.fromString("739a6466-adf8-11e3-aca6-425861b86ab6");
+    private DefaultBinaryStoreReader dbsr;
+    private DefaultFileInfo fileInfo;
 
     @Before
     public void setUp() {
+        fileInfo = createFileInfo();
+
         when(container.logger()).thenReturn(mock(Logger.class));
+        when(binaryStoreManager.loadFile(any())).thenReturn(fileInfoPromise);
+        when(binaryStoreManager.loadChunk(any(), anyInt())).thenReturn(chunkInfoPromise);
+
+        when(fileInfoPromise.<FileInfo>then(any())).thenReturn(fileInfoPromise);
+        when(chunkInfoPromise.<ChunkInfo>then(any())).thenReturn(chunkInfoPromise);
 
         dbsr = new DefaultBinaryStoreReader(binaryStoreManager, container);
-        fileInfo = createFileInfo();
     }
 
     @Test
@@ -73,10 +88,11 @@ public class DefaultBinaryStoreReaderTest {
         fileReader.exceptionHandler(exceptionHandler);
 
         // and capture the cassandra callback and call the onSuccess method on it
-        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+        verify(binaryStoreManager).loadFile(any(UUID.class));
 
         // and when we then call the success method on the binarystore callback
-        loadFileArgumentCaptor.getValue().onSuccess(fileInfo);
+        verify(fileInfoPromise).then(fileInfoFulfilledCaptor.capture());
+        fileInfoFulfilledCaptor.getValue().apply(fileInfo);
 
         // We expect the file handler on our fileReader to be called with a defaultfilereadinfo that contains our
         // created fileinfo
@@ -84,21 +100,22 @@ public class DefaultBinaryStoreReaderTest {
         assertEquals(fileHandlerArgumentCaptor.getValue().getFile(), fileInfo);
 
         // When the loadChunk method is called
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0));
 
         // and when we then call its success method
         byte[] data = "This is chunk 0".getBytes();
         Buffer buffer = new Buffer(data);
-        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
+        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data
         verify(dataHandler).handle(eq(buffer));
 
         // Then we expect loadChunks to be called again
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(1), loadChunkArgumentCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(1));
 
         // And this time we say nothing is found
-        loadChunkArgumentCaptor.getValue().onSuccess(null);
+        chunkInfoFulfilledCaptor.getValue().apply(null);
 
         // We expect our end handler to be called with the OK result
         verify(resultHandler).handle(Result.OK);
@@ -117,16 +134,18 @@ public class DefaultBinaryStoreReaderTest {
         fileReader.exceptionHandler(exceptionHandler);
 
         // and capture the cassandra callback and call the onSuccess method on it
-        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+        verify(binaryStoreManager).loadFile(any(UUID.class));
 
         // and when we then call the success method on the binarystore callback
-        loadFileArgumentCaptor.getValue().onSuccess(fileInfo);
+        verify(fileInfoPromise).then(fileInfoFulfilledCaptor.capture());
+        fileInfoFulfilledCaptor.getValue().apply(fileInfo);
 
         // The loadChunk method is called
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0));
 
         // and when we then call its failure method
-        loadChunkArgumentCaptor.getValue().onFailure(new Throwable("Error"));
+        verify(chunkInfoPromise).otherwise(chunkInfoRejectedCaptor.capture());
+        chunkInfoRejectedCaptor.getValue().apply(new Throwable("Error"));
 
         // We expect the end handler to be called with the error result
         verify(resultHandler).handle(Result.ERROR);
@@ -145,11 +164,12 @@ public class DefaultBinaryStoreReaderTest {
         fileReader.exceptionHandler(exceptionHandler);
 
         // and capture the cassandra callback
-        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+        verify(binaryStoreManager).loadFile(any(UUID.class));
 
         // and when we then call the failure method on the binarystore callback
         Throwable t = new Throwable("Error");
-        loadFileArgumentCaptor.getValue().onFailure(t);
+        verify(fileInfoPromise).otherwise(fileInfoRejectedCaptor.capture());
+        fileInfoRejectedCaptor.getValue().apply(t);
 
         // Then we expect our exception handler to be called
         verify(exceptionHandler).handle(t);
@@ -173,10 +193,11 @@ public class DefaultBinaryStoreReaderTest {
         fileReader.exceptionHandler(exceptionHandler);
 
         // and capture the cassandra callback and call the onSuccess method on it
-        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+        verify(binaryStoreManager).loadFile(any(UUID.class));
 
         // and when we then call the success method on the binarystore callback
-        loadFileArgumentCaptor.getValue().onSuccess(fileInfo);
+        verify(fileInfoPromise).then(fileInfoFulfilledCaptor.capture());
+        fileInfoFulfilledCaptor.getValue().apply(fileInfo);
 
         // We expect the file handler on our fileReader to be called with a defaultfilereadinfo that contains our
         // created fileinfo
@@ -185,11 +206,12 @@ public class DefaultBinaryStoreReaderTest {
         assertEquals(fileHandlerArgumentCaptor.getValue().getRange(), range);
 
         // When the loadChunk method is called
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0));
 
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
-        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
+        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBuffer));
@@ -217,10 +239,11 @@ public class DefaultBinaryStoreReaderTest {
         fileReader.exceptionHandler(exceptionHandler);
 
         // and capture the cassandra callback and call the onSuccess method on it
-        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+        verify(binaryStoreManager).loadFile(any(UUID.class));
 
         // and when we then call the success method on the binarystore callback
-        loadFileArgumentCaptor.getValue().onSuccess(fileInfo);
+        verify(fileInfoPromise).then(fileInfoFulfilledCaptor.capture());
+        fileInfoFulfilledCaptor.getValue().apply(fileInfo);
 
         // We expect the file handler on our fileReader to be called with a defaultfilereadinfo that contains our
         // created fileinfo
@@ -229,11 +252,12 @@ public class DefaultBinaryStoreReaderTest {
         assertEquals(fileHandlerArgumentCaptor.getValue().getRange(), range);
 
         // When the loadChunk method is called
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0));
 
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
-        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
+        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBuffer));
@@ -261,10 +285,11 @@ public class DefaultBinaryStoreReaderTest {
         fileReader.exceptionHandler(exceptionHandler);
 
         // and capture the cassandra callback and call the onSuccess method on it
-        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+        verify(binaryStoreManager).loadFile(any(UUID.class));
 
         // and when we then call the success method on the binarystore callback
-        loadFileArgumentCaptor.getValue().onSuccess(fileInfo);
+        verify(fileInfoPromise).then(fileInfoFulfilledCaptor.capture());
+        fileInfoFulfilledCaptor.getValue().apply(fileInfo);
 
         // We expect the file handler on our fileReader to be called with a defaultfilereadinfo that contains our
         // created fileinfo
@@ -273,11 +298,12 @@ public class DefaultBinaryStoreReaderTest {
         assertEquals(fileHandlerArgumentCaptor.getValue().getRange(), range);
 
         // When the loadChunk method is called
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0));
 
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
-        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
+        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBuffer));
@@ -315,10 +341,11 @@ public class DefaultBinaryStoreReaderTest {
         fileReader.exceptionHandler(exceptionHandler);
 
         // and capture the cassandra callback and call the onSuccess method on it
-        verify(binaryStoreManager).loadFile(any(UUID.class), loadFileArgumentCaptor.capture());
+        verify(binaryStoreManager).loadFile(any(UUID.class));
 
         // and when we then call the success method on the binarystore callback
-        loadFileArgumentCaptor.getValue().onSuccess(multiChunkFile);
+        verify(fileInfoPromise).then(fileInfoFulfilledCaptor.capture());
+        fileInfoFulfilledCaptor.getValue().apply(multiChunkFile);
 
         // We expect the file handler on our fileReader to be called with a defaultfilereadinfo that contains our
         // created fileinfo
@@ -327,20 +354,22 @@ public class DefaultBinaryStoreReaderTest {
         assertEquals(fileHandlerArgumentCaptor.getValue().getRange(), range);
 
         // When the loadChunk method is called
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), loadChunkArgumentCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0));
 
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
-        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
+        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBufferForChunk1));
 
         // When the loadChunk method is called
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(1), loadChunkArgumentCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(1));
 
         // and when we then call its success method
-        loadChunkArgumentCaptor.getValue().onSuccess(new DefaultChunkInfo().setId(uuid).setNum(1).setData(data));
+        verify(chunkInfoPromise, times(2)).then(chunkInfoFulfilledCaptor.capture());
+        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(1).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBufferForChunk2));
@@ -350,7 +379,7 @@ public class DefaultBinaryStoreReaderTest {
         verify(endHandler).handle(null);
     }
 
-    private FileInfo createFileInfo() {
+    private DefaultFileInfo createFileInfo() {
         return new DefaultFileInfo()
                 .setChunkSize(100)
                 .setContentType("image/jpeg")

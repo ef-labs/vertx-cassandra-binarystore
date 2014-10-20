@@ -53,14 +53,11 @@ public class EventBusIntegrationTest extends TestVerticle {
         final UUID id = UUID.randomUUID();
 
         // Handler for when write is complete and then triggers the read to start
-        Handler<Boolean> writeDoneHandler = new Handler<Boolean>() {
-            @Override
-            public void handle(Boolean result) {
-                if (result) {
-                    startReadFile(id);
-                } else {
-                    fail();
-                }
+        Handler<Boolean> writeDoneHandler = result -> {
+            if (result) {
+                startReadFile(id);
+            } else {
+                fail();
             }
         };
 
@@ -80,18 +77,15 @@ public class EventBusIntegrationTest extends TestVerticle {
         results.expectedReplies++;
 
         // Reply handler for writing chunks and the file info
-        Handler<Message<JsonObject>> replyHandler = new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> reply) {
-                String status = reply.body().getString("status");
-                assertEquals("ok", status);
+        Handler<Message<JsonObject>> replyHandler = reply -> {
+            String status = reply.body().getString("status");
+            assertEquals("ok", status);
 
-                if ("ok".equals(status)) {
-                    results.count++;
-                    // Check if we're done
-                    if (results.expectedReplies == results.count) {
-                        doneHandler.handle(true);
-                    }
+            if ("ok".equals(status)) {
+                results.count++;
+                // Check if we're done
+                if (results.expectedReplies == results.count) {
+                    doneHandler.handle(true);
                 }
             }
         };
@@ -142,29 +136,23 @@ public class EventBusIntegrationTest extends TestVerticle {
 
         JsonObject message = new JsonObject().putString("id", id.toString()).putString("action", "getFile");
 
-        eventBus.send(address, message, new Handler<Message<JsonObject>>() {
-            @Override
-            public void handle(Message<JsonObject> reply) {
-                String status = reply.body().getString("status");
-                assertEquals("ok", status);
-                if ("ok".equals(status)) {
+        eventBus.send(address, message, (Message<JsonObject> reply1) -> {
+            String status = reply1.body().getString("status");
+            assertEquals("ok", status);
+            if ("ok".equals(status)) {
 
-                    final int chunkSize = reply.body().getInteger("chunkSize");
-                    final int length = reply.body().getInteger("length");
+                final int chunkSize = reply1.body().getInteger("chunkSize");
+                final int length = reply1.body().getInteger("length");
 
-                    JsonObject chunkMessage = new JsonObject()
-                            .putString("action", "getChunk")
-                            .putString("files_id", id.toString())
-                            .putNumber("n", 0)
-                            .putBoolean("reply", true);
+                JsonObject chunkMessage = new JsonObject()
+                        .putString("action", "getChunk")
+                        .putString("files_id", id.toString())
+                        .putNumber("n", 0)
+                        .putBoolean("reply", true);
 
-                    eventBus.send(address, chunkMessage, new Handler<Message<byte[]>>() {
-                        @Override
-                        public void handle(Message<byte[]> reply) {
-                            handleChunkReply(reply, length, chunkSize, new Buffer());
-                        }
-                    });
-                }
+                eventBus.send(address, chunkMessage, (Message<byte[]> reply2) -> {
+                    handleChunkReply(reply2, length, chunkSize, new Buffer());
+                });
             }
         });
 
@@ -179,12 +167,7 @@ public class EventBusIntegrationTest extends TestVerticle {
             assertEquals(length, buffer.length());
             testComplete();
         } else {
-            message.reply(new JsonObject(), new Handler<Message<byte[]>>() {
-                @Override
-                public void handle(Message<byte[]> reply) {
-                    handleChunkReply(reply, length, chunkSize, buffer);
-                }
-            });
+            message.reply(new JsonObject(), (Message<byte[]> reply) -> handleChunkReply(reply, length, chunkSize, buffer));
         }
 
     }

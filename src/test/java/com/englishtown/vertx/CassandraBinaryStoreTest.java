@@ -1,6 +1,9 @@
 package com.englishtown.vertx;
 
 import com.codahale.metrics.MetricRegistry;
+import com.englishtown.promises.Promise;
+import com.englishtown.promises.When;
+import com.englishtown.promises.WhenFactory;
 import com.englishtown.vertx.cassandra.CassandraSession;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStarter;
@@ -8,7 +11,6 @@ import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.FileInfo;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.impl.DefaultFileInfo;
-import com.google.common.util.concurrent.FutureCallback;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -28,6 +30,7 @@ import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Container;
 
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.*;
@@ -65,16 +68,20 @@ public class CassandraBinaryStoreTest {
     Future<Void> startedResult;
     @Mock
     AsyncResult<Void> voidAsyncResult;
+    @Mock
+    Promise<ChunkInfo> chunkInfoPromise;
+    @Mock
+    Promise<FileInfo> fileInfoPromise;
+    @Mock
+    Promise<Void> voidPromise;
     @Captor
     ArgumentCaptor<FileInfo> fileInfoCaptor;
     @Captor
-    ArgumentCaptor<FutureCallback<Void>> voidCallbackCaptor;
+    ArgumentCaptor<Function<Void, Promise<Void>>> voidFulfilledCaptor;
     @Captor
-    ArgumentCaptor<FutureCallback<FileInfo>> fileInfoCallbackCaptor;
+    ArgumentCaptor<Function<FileInfo, Promise<FileInfo>>> fileInfoCallbackCaptor;
     @Captor
-    ArgumentCaptor<FutureCallback<ChunkInfo>> chunkInfoCallbackCaptor;
-    @Captor
-    ArgumentCaptor<Handler<AsyncResult<Void>>> asyncResultHandlerCaptor;
+    ArgumentCaptor<Function<ChunkInfo, Promise<ChunkInfo>>> chunkInfoFulfilledCaptor;
 
     UUID uuid = UUID.fromString("901025d2-af7d-11e3-88fe-425861b86ab6");
 
@@ -82,12 +89,24 @@ public class CassandraBinaryStoreTest {
     @Before
     public void setUp() throws Exception {
 
+        When when = WhenFactory.createSync();
+
+        when(starter.run()).thenReturn(when.resolve(null));
         when(jsonMessage.body()).thenReturn(jsonBody);
 
         when(container.config()).thenReturn(config);
         when(container.logger()).thenReturn(logger);
         when(vertx.eventBus()).thenReturn(eventBus);
 
+        when(binaryStoreManager.loadChunk(any(UUID.class), anyInt())).thenReturn(chunkInfoPromise);
+        when(binaryStoreManager.loadFile(any(UUID.class))).thenReturn(fileInfoPromise);
+
+        when(binaryStoreManager.storeChunk(any())).thenReturn(voidPromise);
+        when(binaryStoreManager.storeFile(any())).thenReturn(voidPromise);
+
+        when(chunkInfoPromise.<ChunkInfo>then(any())).thenReturn(chunkInfoPromise);
+        when(fileInfoPromise.<FileInfo>then(any())).thenReturn(fileInfoPromise);
+        when(voidPromise.<Void>then(any())).thenReturn(voidPromise);
 
         binaryStore = new CassandraBinaryStore(starter, binaryStoreManager, metricRegistry);
         binaryStore.setVertx(vertx);
@@ -100,10 +119,8 @@ public class CassandraBinaryStoreTest {
     @SuppressWarnings("unchecked")
     public void testStart() throws Exception {
         // Start is called during setUp(), just run verifications
-        verify(starter).run(asyncResultHandlerCaptor.capture());
+        verify(starter).run();
 
-        when(voidAsyncResult.succeeded()).thenReturn(true);
-        asyncResultHandlerCaptor.getValue().handle(voidAsyncResult);
         verify(eventBus).registerHandler(eq(CassandraBinaryStore.DEFAULT_ADDRESS), eq(binaryStore));
         verify(eventBus).registerHandler(eq(CassandraBinaryStore.DEFAULT_ADDRESS + "/saveChunk"), any(Handler.class));
 
@@ -218,8 +235,9 @@ public class CassandraBinaryStoreTest {
 
         binaryStore.saveFile(jsonMessage, jsonBody);
 
-        verify(binaryStoreManager).storeFile(fileInfoCaptor.capture(), voidCallbackCaptor.capture());
-        voidCallbackCaptor.getValue().onSuccess(null);
+        verify(binaryStoreManager).storeFile(fileInfoCaptor.capture());
+        verify(voidPromise).then(voidFulfilledCaptor.capture());
+        voidFulfilledCaptor.getValue().apply(null);
 
         ArgumentCaptor<JsonObject> jsonCaptor = ArgumentCaptor.forClass(JsonObject.class);
         verify(jsonMessage).reply(jsonCaptor.capture());
@@ -246,10 +264,11 @@ public class CassandraBinaryStoreTest {
         binaryStore.saveChunk(bufferMessage);
 
         // Then we expect binaryStoreManager to be called with our expected chunk info
-        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo), voidCallbackCaptor.capture());
+        verify(binaryStoreManager).storeChunk(eq(expectedChunkInfo));
 
         // And then when we call success on the call back
-        voidCallbackCaptor.getValue().onSuccess(null);
+        verify(voidPromise).then(voidFulfilledCaptor.capture());
+        voidFulfilledCaptor.getValue().apply(null);
 
         // And we expect an ok reply
         ArgumentCaptor<JsonObject> jsonCaptor = ArgumentCaptor.forClass(JsonObject.class);
@@ -277,10 +296,11 @@ public class CassandraBinaryStoreTest {
         binaryStore.getFile(jsonMessage, jsonObject);
 
         // Then we expect the binaryStoreManager load file method to be called with our ID
-        verify(binaryStoreManager).loadFile(eq(uuid), fileInfoCallbackCaptor.capture());
+        verify(binaryStoreManager).loadFile(eq(uuid));
 
         // When we call the callback's success method with our fileinfo object
-        fileInfoCallbackCaptor.getValue().onSuccess(fileInfo);
+        verify(fileInfoPromise).then(fileInfoCallbackCaptor.capture());
+        fileInfoCallbackCaptor.getValue().apply(fileInfo);
 
         // Then we expect an OK reply with our expected JSON object
         ArgumentCaptor<JsonObject> jsonCaptor = ArgumentCaptor.forClass(JsonObject.class);
@@ -301,10 +321,11 @@ public class CassandraBinaryStoreTest {
         binaryStore.getChunk(jsonMessage, jsonObject);
 
         // Then we expect the binary store manager's loadchunk method to be called with the right info
-        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0), chunkInfoCallbackCaptor.capture());
+        verify(binaryStoreManager).loadChunk(eq(uuid), eq(0));
 
         // When we call the onSuccess method with our chunkinfo
-        chunkInfoCallbackCaptor.getValue().onSuccess(chunkInfo);
+        verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
+        chunkInfoFulfilledCaptor.getValue().apply(chunkInfo);
 
         // Then we expect a message reply that contains the correct data
         verify(jsonMessage).reply(eq("This is some data".getBytes()), any(Handler.class));

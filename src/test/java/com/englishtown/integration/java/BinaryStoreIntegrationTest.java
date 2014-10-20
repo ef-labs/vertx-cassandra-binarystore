@@ -2,6 +2,8 @@ package com.englishtown.integration.java;
 
 import com.codahale.metrics.MetricRegistry;
 import com.datastax.driver.core.Cluster;
+import com.englishtown.promises.When;
+import com.englishtown.promises.WhenFactory;
 import com.englishtown.vertx.cassandra.CassandraConfigurator;
 import com.englishtown.vertx.cassandra.CassandraSession;
 import com.englishtown.vertx.cassandra.binarystore.*;
@@ -10,17 +12,13 @@ import com.englishtown.vertx.cassandra.impl.DefaultCassandraSession;
 import com.englishtown.vertx.cassandra.impl.EnvironmentCassandraConfigurator;
 import com.englishtown.vertx.cassandra.promises.WhenCassandraSession;
 import com.englishtown.vertx.cassandra.promises.impl.DefaultWhenCassandraSession;
-import com.google.common.util.concurrent.FutureCallback;
 import org.junit.Test;
-import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Future;
-import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.file.AsyncFile;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.testtools.TestVerticle;
 
-import javax.inject.Provider;
 import java.net.URL;
 import java.util.UUID;
 
@@ -49,38 +47,32 @@ public class BinaryStoreIntegrationTest extends TestVerticle {
             return;
         }
 
-        vertx.fileSystem().open(url.getPath(), new Handler<AsyncResult<AsyncFile>>() {
-            @Override
-            public void handle(AsyncResult<AsyncFile> result) {
-                if (result.succeeded()) {
+        vertx.fileSystem().open(url.getPath(), result1 -> {
+            if (result1.succeeded()) {
 
-                    AsyncFile file = result.result();
-                    FileInfo fi = new DefaultFileInfo().setFileName(FILE_NAME).setChunkSize(chunkSize);
+                AsyncFile file = result1.result();
+                FileInfo fi = new DefaultFileInfo().setFileName(FILE_NAME).setChunkSize(chunkSize);
 
-                    binaryStoreWriter.write(fi, file, new FutureCallback<FileInfo>() {
-                                @Override
-                                public void onSuccess(FileInfo result) {
-                                    assertNotNull(result);
-                                    assertNotNull(result.getId());
-                                    assertEquals(FILE_NAME, result.getFileName());
-                                    assertEquals(FILE_LENGTH, result.getLength());
-                                    assertEquals(chunkSize, result.getChunkSize());
-                                    assertEquals(2, result.getChunkCount());
-                                    assertEquals("image/jpeg", result.getContentType());
+                binaryStoreWriter.write(fi, file)
+                        .then(result2 -> {
+                            assertNotNull(result2);
+                            assertNotNull(result2.getId());
+                            assertEquals(FILE_NAME, result2.getFileName());
+                            assertEquals(FILE_LENGTH, result2.getLength());
+                            assertEquals(chunkSize, result2.getChunkSize());
+                            assertEquals(2, result2.getChunkCount());
+                            assertEquals("image/jpeg", result2.getContentType());
 
-                                    testRead(result.getId());
-                                }
+                            testRead(result2.getId());
+                            return null;
+                        })
+                        .otherwise(t -> {
+                            fail(t.getMessage());
+                            return null;
+                        });
 
-                                @Override
-                                public void onFailure(Throwable t) {
-                                    fail(t.getMessage());
-                                }
-                            }
-                    );
-
-                } else {
-                    fail(result.cause().getMessage());
-                }
+            } else {
+                fail(result1.cause().getMessage());
             }
         });
 
@@ -95,62 +87,36 @@ public class BinaryStoreIntegrationTest extends TestVerticle {
         final FileReader.Result[] finalResult = new FileReader.Result[1];
 
         reader
-                .fileHandler(new Handler<FileReadInfo>() {
-                    @Override
-                    public void handle(FileReadInfo fileReadInfo) {
-                        finalFileReadInfo[0] = fileReadInfo;
-                    }
+                .fileHandler(fileReadInfo -> finalFileReadInfo[0] = fileReadInfo)
+                .dataHandler(buffer -> finalBuffer.appendBuffer(buffer))
+                .exceptionHandler(t -> {
+                    handleThrowable(t);
+                    fail();
                 })
-                .dataHandler(new Handler<Buffer>() {
-                    @Override
-                    public void handle(Buffer buffer) {
-                        finalBuffer.appendBuffer(buffer);
-                    }
-                })
-                .exceptionHandler(new Handler<Throwable>() {
-                    @Override
-                    public void handle(Throwable t) {
-                        handleThrowable(t);
-                        fail();
-                    }
-                })
-                .resultHandler(new Handler<FileReader.Result>() {
-                    @Override
-                    public void handle(FileReader.Result result) {
-                        finalResult[0] = result;
-                    }
-                })
-                .endHandler(new Handler<Void>() {
-                    @Override
-                    public void handle(Void event) {
+                .resultHandler(result -> finalResult[0] = result)
+                .endHandler(event -> {
 
-                        FileReader.Result result = finalResult[0];
-                        assertEquals(FileReader.Result.OK, result);
+                    FileReader.Result result = finalResult[0];
+                    assertEquals(FileReader.Result.OK, result);
 
-                        FileReadInfo fileReadInfo = finalFileReadInfo[0];
-                        assertNotNull(fileReadInfo);
-                        FileInfo fileInfo = fileReadInfo.getFile();
+                    FileReadInfo fileReadInfo = finalFileReadInfo[0];
+                    assertNotNull(fileReadInfo);
+                    FileInfo fileInfo = fileReadInfo.getFile();
 
-                        assertEquals(id, fileInfo.getId());
-                        assertEquals(FILE_NAME, fileInfo.getFileName());
-                        assertEquals("image/jpeg", fileInfo.getContentType());
-                        assertEquals(FILE_LENGTH, fileInfo.getLength());
+                    assertEquals(id, fileInfo.getId());
+                    assertEquals(FILE_NAME, fileInfo.getFileName());
+                    assertEquals("image/jpeg", fileInfo.getContentType());
+                    assertEquals(FILE_LENGTH, fileInfo.getLength());
 
-                        assertEquals(FILE_LENGTH, finalBuffer.length());
+                    assertEquals(FILE_LENGTH, finalBuffer.length());
 
-                        testComplete();
+                    testComplete();
 
-                    }
                 });
 
         reader.pause();
 
-        vertx.setTimer(1000, new Handler<Long>() {
-            @Override
-            public void handle(Long event) {
-                reader.resume();
-            }
-        });
+        vertx.setTimer(1000, event -> reader.resume());
 
     }
 
@@ -161,29 +127,29 @@ public class BinaryStoreIntegrationTest extends TestVerticle {
 
         JsonObject config = IntegrationTestHelper.loadConfig();
         container.config().mergeIn(config);
+        When when = WhenFactory.createSync();
 
         CassandraConfigurator configurator = new EnvironmentCassandraConfigurator(container);
         CassandraSession session = new DefaultCassandraSession(builder, configurator, vertx);
-        WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session);
-        BinaryStoreStatements statements = new DefaultBinaryStoreStatements(whenSession);
+        WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session, when);
+        BinaryStoreStatements statements = new DefaultBinaryStoreStatements(whenSession, when);
         BinaryStoreStarter starter = new BinaryStoreStarter(session, statements, container);
-        BinaryStoreManager binaryStoreManager = new DefaultBinaryStoreManager(session, statements, new MetricRegistry());
+        BinaryStoreManager binaryStoreManager = new DefaultBinaryStoreManager(whenSession, statements, new MetricRegistry(), when);
 
-        binaryStoreWriter = new DefaultBinaryStoreWriter(binaryStoreManager);
+        binaryStoreWriter = new DefaultBinaryStoreWriter(binaryStoreManager, when);
         binaryStoreReader = new DefaultBinaryStoreReader(binaryStoreManager, container);
 
-        starter.run(new Handler<AsyncResult<Void>>() {
-            @Override
-            public void handle(AsyncResult<Void> result) {
-                if (result.succeeded()) {
-                    startedResult.setResult(result.result());
+        starter.run()
+                .then(aVoid -> {
+                    startedResult.setResult(aVoid);
                     start();
-                } else {
-                    startedResult.setFailure(result.cause());
+                    return null;
+                })
+                .otherwise(t -> {
+                    startedResult.setFailure(t);
                     fail();
-                }
-            }
-        });
+                    return null;
+                });
 
     }
 }

@@ -1,6 +1,6 @@
 package com.englishtown.vertx.cassandra.binarystore;
 
-import com.google.common.util.concurrent.FutureCallback;
+import com.englishtown.promises.Promise;
 import org.vertx.java.core.streams.ReadStream;
 
 /**
@@ -8,6 +8,6 @@ import org.vertx.java.core.streams.ReadStream;
  */
 public interface BinaryStoreWriter {
 
-    <T> void write(FileInfo fileInfo, ReadStream<T> rs, FutureCallback<FileInfo> callback);
+    <T> Promise<FileInfo> write(FileInfo fileInfo, ReadStream<T> rs);
 
 }
