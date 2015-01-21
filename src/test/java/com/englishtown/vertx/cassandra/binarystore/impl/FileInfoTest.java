@@ -1,5 +1,6 @@
 package com.englishtown.vertx.cassandra.binarystore.impl;
 
+import com.englishtown.vertx.cassandra.binarystore.FileInfo;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -7,11 +8,11 @@ import static org.junit.Assert.assertEquals;
 /**
  * Created by adriangonzalez on 2/12/14.
  */
-public class DefaultFileInfoTest {
+public class FileInfoTest {
     @Test
     public void testGetChunkCount() throws Exception {
 
-        DefaultFileInfo fileInfo = new DefaultFileInfo();
+        FileInfo fileInfo = new FileInfo();
         int count;
 
         count = fileInfo.getChunkCount();

@@ -3,10 +3,27 @@ package com.englishtown.vertx.cassandra.binarystore;
 /**
  * Created by adriangonzalez on 3/10/14.
  */
-public interface FileReadInfo {
+public class FileReadInfo {
 
-    FileInfo getFile();
+    private FileInfo fileInfo;
+    private ContentRange range;
 
-    ContentRange getRange();
+    public FileInfo getFile() {
+        return fileInfo;
+    }
+
+    public FileReadInfo setFile(FileInfo fileInfo) {
+        this.fileInfo = fileInfo;
+        return this;
+    }
+
+    public ContentRange getRange() {
+        return range;
+    }
+
+    public FileReadInfo setRange(ContentRange range) {
+        this.range = range;
+        return this;
+    }
 
 }

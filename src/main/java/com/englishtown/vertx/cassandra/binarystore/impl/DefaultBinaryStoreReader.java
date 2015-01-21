@@ -2,8 +2,8 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 
 import com.englishtown.vertx.cassandra.binarystore.*;
 import com.google.common.primitives.Ints;
-import org.vertx.java.core.logging.Logger;
-import org.vertx.java.platform.Container;
+import io.vertx.core.logging.Logger;
+import io.vertx.core.logging.impl.LoggerFactory;
 
 import javax.inject.Inject;
 import java.util.Arrays;
@@ -15,12 +15,12 @@ import java.util.UUID;
 public class DefaultBinaryStoreReader implements BinaryStoreReader {
 
     private final BinaryStoreManager binaryStoreManager;
-    private final Logger logger;
+    private static final Logger logger = LoggerFactory.getLogger(DefaultBinaryStoreReader.class);
+    ;
 
     @Inject
-    public DefaultBinaryStoreReader(BinaryStoreManager binaryStoreManager, Container container) {
+    public DefaultBinaryStoreReader(BinaryStoreManager binaryStoreManager) {
         this.binaryStoreManager = binaryStoreManager;
-        logger = container.logger();
     }
 
     @Override
@@ -35,7 +35,7 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
 
     private FileReader innerRead(UUID id, final ContentRange range) {
 
-        final DefaultFileReader reader = new DefaultFileReader();
+        final FileReader reader = new FileReader();
 
         binaryStoreManager.loadFile(id)
                 .then(fileInfo -> {
@@ -45,15 +45,15 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
                     }
 
                     if (range == null) {
-                        reader.handleFile(new DefaultFileReadInfo().setFile(fileInfo));
+                        reader.handleFile(new FileReadInfo().setFile(fileInfo));
                         loadChunks(0, fileInfo.getChunkCount(), fileInfo, reader);
                     } else {
                         RangeInfo rangeInfo = new RangeInfo(range, fileInfo);
-                        ContentRange updatedRange = new DefaultContentRange()
+                        ContentRange updatedRange = new ContentRange()
                                 .setFrom(rangeInfo.getFrom())
                                 .setTo(rangeInfo.getTo());
 
-                        reader.handleFile(new DefaultFileReadInfo().setFile(fileInfo).setRange(updatedRange));
+                        reader.handleFile(new FileReadInfo().setFile(fileInfo).setRange(updatedRange));
                         loadRangeChunks(rangeInfo.getStartChunk(), rangeInfo, fileInfo, reader);
                     }
 
@@ -68,7 +68,7 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
 
     }
 
-    private void loadChunks(final int n, final int count, final FileInfo fileInfo, final DefaultFileReader reader) {
+    private void loadChunks(final int n, final int count, final FileInfo fileInfo, final FileReader reader) {
 
         if (n == count) {
             reader.handleEnd(FileReader.Result.OK);
@@ -101,7 +101,7 @@ public class DefaultBinaryStoreReader implements BinaryStoreReader {
             final int n,
             final RangeInfo rangeInfo,
             final FileInfo fileInfo,
-            final DefaultFileReader reader
+            final FileReader reader
     ) {
 
         if (n > rangeInfo.getEndChunk()) {

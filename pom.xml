@@ -2,58 +2,69 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>vertx-mod-cassandra-binarystore</artifactId>
+    <groupId>com.englishtown.vertx</groupId>
+    <artifactId>vertx-cassandra-binarystore</artifactId>
     <packaging>jar</packaging>
     <version>2.0.0-SNAPSHOT</version>
+
     <name>vertx-mod-cassandra-binarystore</name>
     <url>https://github.com/englishtown/vertx-mod-cassandra-binarystore</url>
 
     <parent>
-        <groupId>com.englishtown</groupId>
+        <groupId>com.englishtown.vertx</groupId>
         <artifactId>oss-parent-vertx</artifactId>
-        <version>1.5.0</version>
+        <version>2.0.0-SNAPSHOT</version>
     </parent>
 
     <properties>
         <!--Dependency versions-->
-        <vertx.version>2.1.2</vertx.version>
-        <mockito.version>1.9.5</mockito.version>
-        <vertx.mod.cassandra.version>2.0.0-RC1</vertx.mod.cassandra.version>
-        <vertx.mod.hk2.version>1.7.0</vertx.mod.hk2.version>
-        <vertx.mod.metrics.version>1.1.0</vertx.mod.metrics.version>
-        <vertx.mod.when.version>3.0.0</vertx.mod.when.version>
+        <vertx.version>3.0.0-milestone2</vertx.version>
+        <mockito.version>1.10.19</mockito.version>
+        <vertx.cassandra.version>3.0.0-SNAPSHOT</vertx.cassandra.version>
+        <vertx.hk2.version>2.0.0-SNAPSHOT</vertx.hk2.version>
+        <vertx.when.version>4.0.0-SNAPSHOT</vertx.when.version>
     </properties>
 
     <dependencies>
         <dependency>
-            <groupId>com.englishtown</groupId>
-            <artifactId>vertx-mod-cassandra</artifactId>
-            <version>${vertx.mod.cassandra.version}</version>
-            <scope>provided</scope>
+            <groupId>com.englishtown.vertx</groupId>
+            <artifactId>ext-cassandra</artifactId>
+            <version>${vertx.cassandra.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.englishtown</groupId>
-            <artifactId>vertx-mod-hk2</artifactId>
-            <version>${vertx.mod.hk2.version}</version>
-            <scope>provided</scope>
+            <groupId>com.englishtown.vertx</groupId>
+            <artifactId>ext-hk2</artifactId>
+            <version>${vertx.hk2.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.englishtown</groupId>
-            <artifactId>vertx-mod-metrics</artifactId>
-            <version>${vertx.mod.metrics.version}</version>
+            <groupId>com.englishtown.vertx</groupId>
+            <artifactId>ext-when</artifactId>
+            <version>${vertx.when.version}</version>
             <scope>provided</scope>
         </dependency>
+
         <dependency>
-            <groupId>com.englishtown</groupId>
-            <artifactId>vertx-mod-when</artifactId>
-            <version>${vertx.mod.when.version}</version>
-            <scope>provided</scope>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-service-proxy</artifactId>
+            <version>${vertx.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-codegen</artifactId>
+            <version>${vertx.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-lang-js</artifactId>
+            <version>${vertx.version}</version>
+            <optional>true</optional>
         </dependency>
 
         <!--Test dependencies-->
         <dependency>
             <groupId>org.mockito</groupId>
-            <artifactId>mockito-all</artifactId>
+            <artifactId>mockito-core</artifactId>
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>

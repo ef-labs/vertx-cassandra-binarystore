@@ -2,6 +2,8 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 
 import com.englishtown.promises.Promise;
 import com.englishtown.vertx.cassandra.binarystore.*;
+import io.vertx.core.Handler;
+import io.vertx.core.buffer.Buffer;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -9,10 +11,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
-import org.vertx.java.core.Handler;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.logging.Logger;
-import org.vertx.java.platform.Container;
 
 import java.util.UUID;
 import java.util.function.Function;
@@ -30,8 +28,6 @@ public class DefaultBinaryStoreReaderTest {
 
     @Mock
     BinaryStoreManager binaryStoreManager;
-    @Mock
-    Container container;
     @Mock
     Handler<Buffer> dataHandler;
     @Mock
@@ -56,24 +52,23 @@ public class DefaultBinaryStoreReaderTest {
     @Captor
     ArgumentCaptor<Function<Throwable, Promise<ChunkInfo>>> chunkInfoRejectedCaptor;
     @Captor
-    ArgumentCaptor<DefaultFileReadInfo> fileHandlerArgumentCaptor;
+    ArgumentCaptor<FileReadInfo> fileHandlerArgumentCaptor;
 
     private UUID uuid = UUID.fromString("739a6466-adf8-11e3-aca6-425861b86ab6");
     private DefaultBinaryStoreReader dbsr;
-    private DefaultFileInfo fileInfo;
+    private FileInfo fileInfo;
 
     @Before
     public void setUp() {
         fileInfo = createFileInfo();
 
-        when(container.logger()).thenReturn(mock(Logger.class));
         when(binaryStoreManager.loadFile(any())).thenReturn(fileInfoPromise);
         when(binaryStoreManager.loadChunk(any(), anyInt())).thenReturn(chunkInfoPromise);
 
         when(fileInfoPromise.<FileInfo>then(any())).thenReturn(fileInfoPromise);
         when(chunkInfoPromise.<ChunkInfo>then(any())).thenReturn(chunkInfoPromise);
 
-        dbsr = new DefaultBinaryStoreReader(binaryStoreManager, container);
+        dbsr = new DefaultBinaryStoreReader(binaryStoreManager);
     }
 
     @Test
@@ -81,7 +76,7 @@ public class DefaultBinaryStoreReaderTest {
 
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.read(uuid);
-        fileReader.dataHandler(dataHandler);
+        fileReader.handler(dataHandler);
         fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
@@ -104,9 +99,9 @@ public class DefaultBinaryStoreReaderTest {
 
         // and when we then call its success method
         byte[] data = "This is chunk 0".getBytes();
-        Buffer buffer = new Buffer(data);
+        Buffer buffer = Buffer.buffer(data);
         verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
-        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        chunkInfoFulfilledCaptor.getValue().apply(new ChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data
         verify(dataHandler).handle(eq(buffer));
@@ -127,7 +122,7 @@ public class DefaultBinaryStoreReaderTest {
 
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.read(uuid);
-        fileReader.dataHandler(dataHandler);
+        fileReader.handler(dataHandler);
         fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
@@ -157,7 +152,7 @@ public class DefaultBinaryStoreReaderTest {
 
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.read(uuid);
-        fileReader.dataHandler(dataHandler);
+        fileReader.handler(dataHandler);
         fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
@@ -178,15 +173,15 @@ public class DefaultBinaryStoreReaderTest {
     @Test
     public void testReadWithRange() throws Exception {
         // Initialise
-        ContentRange range = new DefaultContentRange()
+        ContentRange range = new ContentRange()
                 .setFrom(5)
                 .setTo(15);
         byte[] expectedRange = "fghijklmnop".getBytes();
-        Buffer expectedRangeBuffer = new Buffer(expectedRange);
+        Buffer expectedRangeBuffer = Buffer.buffer(expectedRange);
 
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.readRange(uuid, range);
-        fileReader.dataHandler(dataHandler);
+        fileReader.handler(dataHandler);
         fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
@@ -211,7 +206,7 @@ public class DefaultBinaryStoreReaderTest {
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
         verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
-        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        chunkInfoFulfilledCaptor.getValue().apply(new ChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBuffer));
@@ -224,15 +219,15 @@ public class DefaultBinaryStoreReaderTest {
     @Test
     public void testRangeReadOfFinalByte() throws Exception {
         // Initialise
-        ContentRange range = new DefaultContentRange()
+        ContentRange range = new ContentRange()
                 .setFrom(25)
                 .setTo(25);
         byte[] expectedRange = "z".getBytes();
-        Buffer expectedRangeBuffer = new Buffer(expectedRange);
+        Buffer expectedRangeBuffer = Buffer.buffer(expectedRange);
 
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.readRange(uuid, range);
-        fileReader.dataHandler(dataHandler);
+        fileReader.handler(dataHandler);
         fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
@@ -257,7 +252,7 @@ public class DefaultBinaryStoreReaderTest {
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
         verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
-        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        chunkInfoFulfilledCaptor.getValue().apply(new ChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBuffer));
@@ -270,15 +265,15 @@ public class DefaultBinaryStoreReaderTest {
     @Test
     public void testRangeReadOfFirstByte() throws Exception {
         // Initialise
-        ContentRange range = new DefaultContentRange()
+        ContentRange range = new ContentRange()
                 .setFrom(0)
                 .setTo(0);
         byte[] expectedRange = "a".getBytes();
-        Buffer expectedRangeBuffer = new Buffer(expectedRange);
+        Buffer expectedRangeBuffer = Buffer.buffer(expectedRange);
 
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.readRange(uuid, range);
-        fileReader.dataHandler(dataHandler);
+        fileReader.handler(dataHandler);
         fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
@@ -303,7 +298,7 @@ public class DefaultBinaryStoreReaderTest {
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
         verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
-        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        chunkInfoFulfilledCaptor.getValue().apply(new ChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBuffer));
@@ -316,7 +311,7 @@ public class DefaultBinaryStoreReaderTest {
     @Test
     public void testRangeReadOverMultipleChunks() throws Exception {
         // Initialise
-        FileInfo multiChunkFile = new DefaultFileInfo()
+        FileInfo multiChunkFile = new FileInfo()
                 .setChunkSize(26)
                 .setContentType("image/jpeg")
                 .setFileName("testfile.jpg")
@@ -324,17 +319,17 @@ public class DefaultBinaryStoreReaderTest {
                 .setLength(52L)
                 .setUploadDate(123456789L);
 
-        ContentRange range = new DefaultContentRange()
+        ContentRange range = new ContentRange()
                 .setFrom(20)
                 .setTo(30);
         byte[] expectedRangeForChunk1 = "uvwxyz".getBytes();
-        Buffer expectedRangeBufferForChunk1 = new Buffer(expectedRangeForChunk1);
+        Buffer expectedRangeBufferForChunk1 = Buffer.buffer(expectedRangeForChunk1);
         byte[] expectedRangeForChunk2 = "abcde".getBytes();
-        Buffer expectedRangeBufferForChunk2 = new Buffer(expectedRangeForChunk2);
+        Buffer expectedRangeBufferForChunk2 = Buffer.buffer(expectedRangeForChunk2);
 
         // When we call read and then set up the handlers for the File Reader
         FileReader fileReader = dbsr.readRange(uuid, range);
-        fileReader.dataHandler(dataHandler);
+        fileReader.handler(dataHandler);
         fileReader.resultHandler(resultHandler);
         fileReader.endHandler(endHandler);
         fileReader.fileHandler(fileHandler);
@@ -359,7 +354,7 @@ public class DefaultBinaryStoreReaderTest {
         // and when we then call its success method
         byte[] data = "abcdefghijklmnopqrstuvwxyz".getBytes();
         verify(chunkInfoPromise).then(chunkInfoFulfilledCaptor.capture());
-        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(0).setData(data));
+        chunkInfoFulfilledCaptor.getValue().apply(new ChunkInfo().setId(uuid).setNum(0).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBufferForChunk1));
@@ -369,7 +364,7 @@ public class DefaultBinaryStoreReaderTest {
 
         // and when we then call its success method
         verify(chunkInfoPromise, times(2)).then(chunkInfoFulfilledCaptor.capture());
-        chunkInfoFulfilledCaptor.getValue().apply(new DefaultChunkInfo().setId(uuid).setNum(1).setData(data));
+        chunkInfoFulfilledCaptor.getValue().apply(new ChunkInfo().setId(uuid).setNum(1).setData(data));
 
         // We expect our data handler to be called with our data, within the right range
         verify(dataHandler).handle(eq(expectedRangeBufferForChunk2));
@@ -379,8 +374,8 @@ public class DefaultBinaryStoreReaderTest {
         verify(endHandler).handle(null);
     }
 
-    private DefaultFileInfo createFileInfo() {
-        return new DefaultFileInfo()
+    private FileInfo createFileInfo() {
+        return new FileInfo()
                 .setChunkSize(100)
                 .setContentType("image/jpeg")
                 .setFileName("testfile.jpg")

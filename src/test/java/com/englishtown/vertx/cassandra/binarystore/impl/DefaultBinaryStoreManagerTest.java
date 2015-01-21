@@ -180,7 +180,7 @@ public class DefaultBinaryStoreManagerTest {
     public void testStoringAChunk() throws Exception {
         // Create our chunk info
         ByteBuffer byteBuffer = ByteBuffer.wrap("This is some data".getBytes());
-        ChunkInfo chunkInfo = new DefaultChunkInfo().setId(uuid).setNum(1).setData(byteBuffer.array());
+        ChunkInfo chunkInfo = new ChunkInfo().setId(uuid).setNum(1).setData(byteBuffer.array());
 
         // Set up interactions
         when(binaryStoreStatements.getStoreChunk()).thenReturn(preparedStatement);
@@ -204,7 +204,7 @@ public class DefaultBinaryStoreManagerTest {
     public void testStoringAChunkUnsuccessfully() throws Exception {
         // Create our chunk info
         ByteBuffer byteBuffer = ByteBuffer.wrap("This is some data".getBytes());
-        ChunkInfo chunkInfo = new DefaultChunkInfo().setId(uuid).setNum(1).setData(byteBuffer.array());
+        ChunkInfo chunkInfo = new ChunkInfo().setId(uuid).setNum(1).setData(byteBuffer.array());
 
         // Set up interactions
         when(binaryStoreStatements.getStoreChunk()).thenReturn(preparedStatement);
@@ -311,7 +311,7 @@ public class DefaultBinaryStoreManagerTest {
     @Test
     public void testLoadingAChunk() throws Exception {
         // Set the chunkinfo to compare at the end
-        ChunkInfo chunkInfo = new DefaultChunkInfo().setId(uuid).setNum(1).setData("This is some data".getBytes());
+        ChunkInfo chunkInfo = new ChunkInfo().setId(uuid).setNum(1).setData("This is some data".getBytes());
 
         // Set up interactions
         when(binaryStoreStatements.getLoadChunk()).thenReturn(preparedStatement);
@@ -386,7 +386,7 @@ public class DefaultBinaryStoreManagerTest {
     }
 
     private FileInfo createFileInfo() {
-        return new DefaultFileInfo()
+        return new FileInfo()
                 .setChunkSize(100)
                 .setContentType("image/jpeg")
                 .setFileName("testfile.jpg")

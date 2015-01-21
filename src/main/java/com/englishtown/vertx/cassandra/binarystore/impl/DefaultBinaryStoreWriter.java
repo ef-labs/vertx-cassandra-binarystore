@@ -3,12 +3,9 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 import com.englishtown.promises.Deferred;
 import com.englishtown.promises.Promise;
 import com.englishtown.promises.When;
-import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
-import com.englishtown.vertx.cassandra.binarystore.BinaryStoreWriter;
-import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
-import com.englishtown.vertx.cassandra.binarystore.FileInfo;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.streams.ReadStream;
+import com.englishtown.vertx.cassandra.binarystore.*;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.streams.ReadStream;
 
 import javax.inject.Inject;
 import java.util.ArrayList;
@@ -31,10 +28,10 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
     }
 
     @Override
-    public <T> Promise<FileInfo> write(final FileInfo fileInfo, final ReadStream<T> rs) {
+    public Promise<FileInfo> write(final FileInfo fileInfo, final ReadStream<Buffer> rs) {
 
         // Copy file info to a writeable version and fill in missing fields
-        DefaultFileInfo writeableFileInfo = new DefaultFileInfo()
+        FileInfo writeableFileInfo = new FileInfo()
                 .setId((fileInfo.getId() == null ? UUID.randomUUID() : fileInfo.getId()))
                 .setFileName(fileInfo.getFileName())
                 .setChunkSize((fileInfo.getChunkSize() <= 0 ? DEFAULT_CHUNK_SIZE : fileInfo.getChunkSize()))
@@ -46,7 +43,7 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
 
     }
 
-    private <T> Promise<FileInfo> innerWrite(final DefaultFileInfo fileInfo, final ReadStream<T> rs) {
+    private <T> Promise<FileInfo> innerWrite(final FileInfo fileInfo, final ReadStream<Buffer> rs) {
 
         WriteInfo info = new WriteInfo();
         List<Promise<Void>> promises = new ArrayList<>();
@@ -54,7 +51,7 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
 
         // NOTE: There is no throttling on ReadStream data.
         // This shouldn't be a problem, but could consider calling pause/resume on rs when writing chunks.
-        rs.dataHandler(data -> handleData(data, info, fileInfo, promises));
+        rs.handler(data -> handleData(data, info, fileInfo, promises));
 
         rs.endHandler(event -> {
             handleEnd(info.buffer, info.num, fileInfo, promises);
@@ -69,14 +66,14 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
     private void handleEnd(
             Buffer buffer,
             int num,
-            DefaultFileInfo fileInfo,
+            FileInfo fileInfo,
             List<Promise<Void>> promises) {
 
         if (buffer.length() > 0) {
             long newLen = buffer.length() + fileInfo.getLength();
             fileInfo.setLength(newLen);
 
-            ChunkInfo chunkInfo = new DefaultChunkInfo()
+            ChunkInfo chunkInfo = new ChunkInfo()
                     .setId(fileInfo.getId())
                     .setNum(num)
                     .setData(buffer.getBytes());
@@ -91,7 +88,7 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
     private void handleData(
             Buffer data,
             WriteInfo info,
-            DefaultFileInfo fileInfo,
+            FileInfo fileInfo,
             List<Promise<Void>> promises) {
 
         int newLength = info.buffer.length() + data.length();
@@ -101,13 +98,13 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
 
         } else {
             // Have at least a full chunk
-            Buffer chunk = new Buffer();
+            Buffer chunk = Buffer.buffer();
             chunk.appendBuffer(info.buffer);
 
             if (newLength == fileInfo.getChunkSize()) {
                 // Exactly one chunk
                 chunk.appendBuffer(data);
-                info.buffer = new Buffer();
+                info.buffer = Buffer.buffer();
 
             } else {
                 // Will have some remainder to keep in buffer
@@ -115,13 +112,13 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
                 chunk.appendBytes(data.getBytes(0, len));
 
                 // Add additional chunk to a new buffer
-                Buffer remaining = new Buffer();
+                Buffer remaining = Buffer.buffer();
                 remaining.appendBytes(data.getBytes(len, data.length()));
 
                 info.buffer = remaining;
             }
 
-            ChunkInfo chunkInfo = new DefaultChunkInfo()
+            ChunkInfo chunkInfo = new ChunkInfo()
                     .setId(fileInfo.getId())
                     .setNum(info.num)
                     .setData(chunk.getBytes());
@@ -177,7 +174,7 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
     }
 
     private static class WriteInfo {
-        Buffer buffer = new Buffer();
+        Buffer buffer = Buffer.buffer();
         int num = 0;
     }
 

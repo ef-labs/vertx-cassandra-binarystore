@@ -8,6 +8,9 @@ import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
 import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.FileInfo;
 import com.google.common.util.concurrent.FutureCallback;
+import io.vertx.core.Handler;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.streams.ReadStream;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -15,10 +18,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
-import org.vertx.java.core.Handler;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.file.AsyncFile;
-import org.vertx.java.core.streams.ReadStream;
 
 import java.util.UUID;
 
@@ -35,7 +34,7 @@ public class DefaultBinaryStoreWriterTest {
     @Mock
     BinaryStoreManager binaryStoreManager;
     @Mock
-    ReadStream<AsyncFile> readStream;
+    ReadStream<Buffer> readStream;
 
     @Captor
     ArgumentCaptor<Handler<Buffer>> dataHandlerCaptor;
@@ -49,7 +48,7 @@ public class DefaultBinaryStoreWriterTest {
     When when;
     UUID uuid = UUID.fromString("739a6466-adf8-11e3-aca6-425861b86ab6");
     DefaultBinaryStoreWriter dbsw;
-    DefaultFileInfo fileInfo;
+    FileInfo fileInfo;
     String[] names = {"test.zip", "test.png", "test.jpg", "test.jpeg", "test.mp3", "test.m4a", "test.mov", "test.mp4",
             "test.ogg", "test.webm"};
     String[] types = {"application/zip", "image/png", "image/jpeg", "image/jpeg", "audio/mpeg", "audio/mp4",
@@ -67,13 +66,13 @@ public class DefaultBinaryStoreWriterTest {
     @Test
     public void testWritingWithSingleChunk() throws Exception {
         // Set up our data
-        Buffer buffer = new Buffer().appendBytes("This is just a small amount of data".getBytes());
-        ChunkInfo expectedChunkInfo = new DefaultChunkInfo().setId(uuid).setNum(0).setData(buffer.getBytes());
+        Buffer buffer = Buffer.buffer("This is just a small amount of data");
+        ChunkInfo expectedChunkInfo = new ChunkInfo().setId(uuid).setNum(0).setData(buffer.getBytes());
         fileInfo.setLength(buffer.length());
 
         // When we call the write method
         Promise<FileInfo> p = dbsw.write(fileInfo, readStream);
-        verify(readStream).dataHandler(dataHandlerCaptor.capture());
+        verify(readStream).handler(dataHandlerCaptor.capture());
         verify(readStream).endHandler(endHandlerCaptor.capture());
 
         // and call the data handler set on the read stream
@@ -100,18 +99,18 @@ public class DefaultBinaryStoreWriterTest {
     public void testWritingWithMultipleChunks() throws Exception {
 
         // Build up buffer that makes two chunks
-        Buffer buffer = new Buffer();
+        Buffer buffer = Buffer.buffer();
         for (int i = 0; i < 150; i++) {
             buffer.appendByte((byte) i);
         }
 
         // Set up our expected chunkInfo
-        ChunkInfo expectedChunkInfo = new DefaultChunkInfo().setId(uuid).setNum(0).setData(buffer.getBytes(0, 100));
-        ChunkInfo expectedChunkInfo2 = new DefaultChunkInfo().setId(uuid).setNum(1).setData(buffer.getBytes(100, buffer.length()));
+        ChunkInfo expectedChunkInfo = new ChunkInfo().setId(uuid).setNum(0).setData(buffer.getBytes(0, 100));
+        ChunkInfo expectedChunkInfo2 = new ChunkInfo().setId(uuid).setNum(1).setData(buffer.getBytes(100, buffer.length()));
 
         // Then call the write method
         Promise<FileInfo> p = dbsw.write(fileInfo, readStream);
-        verify(readStream).dataHandler(dataHandlerCaptor.capture());
+        verify(readStream).handler(dataHandlerCaptor.capture());
         verify(readStream).endHandler(endHandlerCaptor.capture());
 
         // and call the data handler set on the read stream
@@ -146,7 +145,7 @@ public class DefaultBinaryStoreWriterTest {
             fileInfo.setFileName(names[i]);
             fileInfo.setContentType(null);
 
-            ReadStream<AsyncFile> readStream = mock(ReadStream.class);
+            ReadStream<Buffer> readStream = mock(ReadStream.class);
             FutureCallback<FileInfo> callback = mock(FutureCallback.class);
             ArgumentCaptor<Handler> endHandlerCaptor = ArgumentCaptor.forClass(Handler.class);
             ArgumentCaptor<FileInfo> fileInfoArgumentCaptor = ArgumentCaptor.forClass(FileInfo.class);
@@ -166,8 +165,8 @@ public class DefaultBinaryStoreWriterTest {
     }
 
 
-    private DefaultFileInfo createFileInfo() {
-        return new DefaultFileInfo()
+    private FileInfo createFileInfo() {
+        return new FileInfo()
                 .setChunkSize(100)
                 .setContentType("image/jpeg")
                 .setFileName("testfile.jpg")

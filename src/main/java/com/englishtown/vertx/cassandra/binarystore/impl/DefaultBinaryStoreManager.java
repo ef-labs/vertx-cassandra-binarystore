@@ -39,6 +39,20 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
     @Override
     public Promise<Void> storeFile(FileInfo fileInfo) {
 
+        if (fileInfo == null) {
+            throw new IllegalArgumentException("fileInfo was null");
+        }
+        if (fileInfo.getId() == null) {
+            throw new IllegalArgumentException("fileInfo missing id");
+        }
+        if (fileInfo.getLength() <= 0) {
+            throw new IllegalArgumentException("fileInfo must have length > 0");
+        }
+
+        if (fileInfo.getUploadDate() <= 0) {
+            fileInfo.setUploadDate( System.currentTimeMillis());
+        }
+
         final Metrics.Context context = fileMetrics.timeWrite();
 
         BoundStatement insert = statements
@@ -104,7 +118,7 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
                         return when.resolve(null);
                     }
 
-                    DefaultFileInfo fileInfo = new DefaultFileInfo()
+                    FileInfo fileInfo = new FileInfo()
                             .setId(id)
                             .setFileName(row.getString("filename"))
                             .setContentType(row.getString("contentType"))
@@ -143,7 +157,7 @@ public class DefaultBinaryStoreManager implements BinaryStoreManager {
                     byte[] data = new byte[bb.remaining()];
                     bb.get(data);
 
-                    DefaultChunkInfo chunkInfo = new DefaultChunkInfo()
+                    ChunkInfo chunkInfo = new ChunkInfo()
                             .setId(id)
                             .setNum(n)
                             .setData(data);
