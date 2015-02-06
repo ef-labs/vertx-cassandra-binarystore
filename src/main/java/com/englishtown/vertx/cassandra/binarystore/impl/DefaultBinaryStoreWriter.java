@@ -1,14 +1,11 @@
 package com.englishtown.vertx.cassandra.binarystore.impl;
 
-import com.englishtown.promises.*;
-import com.englishtown.vertx.cassandra.binarystore.BinaryStoreManager;
-import com.englishtown.vertx.cassandra.binarystore.BinaryStoreWriter;
-import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
-import com.englishtown.vertx.cassandra.binarystore.FileInfo;
-import com.google.common.util.concurrent.FutureCallback;
-import org.vertx.java.core.Handler;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.streams.ReadStream;
+import com.englishtown.promises.Deferred;
+import com.englishtown.promises.Promise;
+import com.englishtown.promises.When;
+import com.englishtown.vertx.cassandra.binarystore.*;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.streams.ReadStream;
 
 import javax.inject.Inject;
 import java.util.ArrayList;
@@ -21,19 +18,20 @@ import java.util.UUID;
 public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
 
     private final BinaryStoreManager binaryStoreManager;
-    private final When<Void> voidWhen = new When<>();
+    private final When when;
     public static final int DEFAULT_CHUNK_SIZE = 1024000;
 
     @Inject
-    public DefaultBinaryStoreWriter(BinaryStoreManager binaryStoreManager) {
+    public DefaultBinaryStoreWriter(BinaryStoreManager binaryStoreManager, When when) {
         this.binaryStoreManager = binaryStoreManager;
+        this.when = when;
     }
 
     @Override
-    public <T> void write(final FileInfo fileInfo, final ReadStream<T> rs, final FutureCallback<FileInfo> callback) {
+    public Promise<FileInfo> write(final FileInfo fileInfo, final ReadStream<Buffer> rs) {
 
         // Copy file info to a writeable version and fill in missing fields
-        DefaultFileInfo writeableFileInfo = new DefaultFileInfo()
+        FileInfo writeableFileInfo = new FileInfo()
                 .setId((fileInfo.getId() == null ? UUID.randomUUID() : fileInfo.getId()))
                 .setFileName(fileInfo.getFileName())
                 .setChunkSize((fileInfo.getChunkSize() <= 0 ? DEFAULT_CHUNK_SIZE : fileInfo.getChunkSize()))
@@ -41,164 +39,97 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
                 .setMetadata(fileInfo.getMetadata())
                 .setUploadDate((fileInfo.getUploadDate() == 0 ? System.currentTimeMillis() : fileInfo.getUploadDate()));
 
-        innerWrite(writeableFileInfo, rs, callback);
+        return innerWrite(writeableFileInfo, rs);
 
     }
 
-    private <T> void innerWrite(final DefaultFileInfo fileInfo, final ReadStream<T> rs, final FutureCallback<FileInfo> callback) {
+    private <T> Promise<FileInfo> innerWrite(final FileInfo fileInfo, final ReadStream<Buffer> rs) {
 
-        final Value<Buffer> buffer = new Value<>(new Buffer());
-        final Value<Integer> num = new Value<>(0);
-
-        final List<Promise<Void>> promises = new ArrayList<>();
+        WriteInfo info = new WriteInfo();
+        List<Promise<Void>> promises = new ArrayList<>();
+        Deferred<FileInfo> d = when.defer();
 
         // NOTE: There is no throttling on ReadStream data.
         // This shouldn't be a problem, but could consider calling pause/resume on rs when writing chunks.
-        rs.dataHandler(new Handler<Buffer>() {
-            @Override
-            public void handle(Buffer data) {
-                handleData(data, buffer, num, fileInfo, promises);
-            }
+        rs.handler(data -> handleData(data, info, fileInfo, promises));
+
+        rs.endHandler(event -> {
+            handleEnd(info.buffer, info.num, fileInfo, promises);
+            d.resolve(when.all(promises).then(voids -> when.resolve(fileInfo)));
         });
 
-        rs.endHandler(new Handler<Void>() {
-            @Override
-            public void handle(Void event) {
+        rs.exceptionHandler(t -> d.reject(t));
 
-                handleEnd(buffer, num, fileInfo, promises);
-                voidWhen.all(promises).then(
-                        new FulfilledRunnable<List<? extends Void>>() {
-                            @Override
-                            public Promise<List<? extends Void>> run(List<? extends Void> voids) {
-                                callback.onSuccess(fileInfo);
-                                return null;
-                            }
-                        },
-                        new RejectedRunnable<List<? extends Void>>() {
-                            @Override
-                            public com.englishtown.promises.Promise<List<? extends Void>> run(com.englishtown.promises.Value<List<? extends Void>> listValue) {
-                                callback.onFailure(listValue.getCause());
-                                return null;
-                            }
-                        }
-                );
-            }
-        });
-
-        rs.exceptionHandler(new Handler<Throwable>() {
-            @Override
-            public void handle(Throwable t) {
-                callback.onFailure(t);
-            }
-        });
-
+        return d.getPromise();
     }
 
     private void handleEnd(
-            Value<Buffer> buffer,
-            Value<Integer> num,
-            DefaultFileInfo fileInfo,
+            Buffer buffer,
+            int num,
+            FileInfo fileInfo,
             List<Promise<Void>> promises) {
 
-        if (buffer.getValue().length() > 0) {
-            long newLen = buffer.getValue().length() + fileInfo.getLength();
+        if (buffer.length() > 0) {
+            long newLen = buffer.length() + fileInfo.getLength();
             fileInfo.setLength(newLen);
 
-            ChunkInfo chunkInfo = new DefaultChunkInfo()
+            ChunkInfo chunkInfo = new ChunkInfo()
                     .setId(fileInfo.getId())
-                    .setNum(num.getValue())
-                    .setData(buffer.getValue().getBytes());
+                    .setNum(num)
+                    .setData(buffer.getBytes());
 
-            final Deferred<Void> d = voidWhen.defer();
-            promises.add(d.getPromise());
-            binaryStoreManager.storeChunk(chunkInfo, new FutureCallback<Void>() {
-                @Override
-                public void onSuccess(Void result) {
-                    d.getResolver().resolve((Void) null);
-                }
-
-                @Override
-                public void onFailure(Throwable t) {
-                    d.getResolver().reject(t);
-                }
-            });
+            promises.add(binaryStoreManager.storeChunk(chunkInfo));
         }
 
-        final Deferred<Void> d2 = voidWhen.defer();
-        promises.add(d2.getPromise());
-
-        binaryStoreManager.storeFile(fileInfo, new FutureCallback<Void>() {
-            @Override
-            public void onSuccess(Void result) {
-                d2.getResolver().resolve((Void) null);
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                d2.getResolver().reject(t);
-            }
-        });
+        promises.add(binaryStoreManager.storeFile(fileInfo));
 
     }
 
     private void handleData(
             Buffer data,
-            Value<Buffer> buffer,
-            Value<Integer> num,
-            DefaultFileInfo fileInfo,
+            WriteInfo info,
+            FileInfo fileInfo,
             List<Promise<Void>> promises) {
 
-        int newLength = buffer.getValue().length() + data.length();
+        int newLength = info.buffer.length() + data.length();
         if (newLength < fileInfo.getChunkSize()) {
             // Just append
-            buffer.getValue().appendBuffer(data);
+            info.buffer.appendBuffer(data);
 
         } else {
             // Have at least a full chunk
-            Buffer chunk = new Buffer();
-            chunk.appendBuffer(buffer.getValue());
+            Buffer chunk = Buffer.buffer();
+            chunk.appendBuffer(info.buffer);
 
             if (newLength == fileInfo.getChunkSize()) {
                 // Exactly one chunk
                 chunk.appendBuffer(data);
-                buffer.setValue(new Buffer());
+                info.buffer = Buffer.buffer();
 
             } else {
                 // Will have some remainder to keep in buffer
-                int len = fileInfo.getChunkSize() - buffer.getValue().length();
+                int len = fileInfo.getChunkSize() - info.buffer.length();
                 chunk.appendBytes(data.getBytes(0, len));
 
                 // Add additional chunk to a new buffer
-                Buffer remaining = new Buffer();
+                Buffer remaining = Buffer.buffer();
                 remaining.appendBytes(data.getBytes(len, data.length()));
 
-                buffer.setValue(remaining);
+                info.buffer = remaining;
             }
 
-            ChunkInfo chunkInfo = new DefaultChunkInfo()
+            ChunkInfo chunkInfo = new ChunkInfo()
                     .setId(fileInfo.getId())
-                    .setNum(num.getValue())
+                    .setNum(info.num)
                     .setData(chunk.getBytes());
 
             // Increase num of chunks and total file length
-            num.setValue(num.getValue() + 1);
+            info.num += 1;
             long totalLen = fileInfo.getChunkSize() + fileInfo.getLength();
             fileInfo.setLength(totalLen);
 
-            final Deferred<Void> d = voidWhen.defer();
-            promises.add(d.getPromise());
+            promises.add(binaryStoreManager.storeChunk(chunkInfo));
 
-            binaryStoreManager.storeChunk(chunkInfo, new FutureCallback<Void>() {
-                @Override
-                public void onSuccess(Void result) {
-                    d.getResolver().resolve((Void) null);
-                }
-
-                @Override
-                public void onFailure(Throwable t) {
-                    d.getResolver().reject(t);
-                }
-            });
         }
     }
 
@@ -240,6 +171,11 @@ public class DefaultBinaryStoreWriter implements BinaryStoreWriter {
                 return null;
         }
 
+    }
+
+    private static class WriteInfo {
+        Buffer buffer = Buffer.buffer();
+        int num = 0;
     }
 
 }

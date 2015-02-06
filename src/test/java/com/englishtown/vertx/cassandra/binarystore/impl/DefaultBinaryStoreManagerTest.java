@@ -3,15 +3,15 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Timer;
-import com.datastax.driver.core.BoundStatement;
-import com.datastax.driver.core.PreparedStatement;
-import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.Row;
-import com.englishtown.vertx.cassandra.CassandraSession;
+import com.datastax.driver.core.*;
+import com.englishtown.promises.HandlerState;
+import com.englishtown.promises.Promise;
+import com.englishtown.promises.When;
+import com.englishtown.promises.WhenFactory;
 import com.englishtown.vertx.cassandra.binarystore.BinaryStoreStatements;
 import com.englishtown.vertx.cassandra.binarystore.ChunkInfo;
 import com.englishtown.vertx.cassandra.binarystore.FileInfo;
-import com.google.common.util.concurrent.FutureCallback;
+import com.englishtown.vertx.cassandra.promises.WhenCassandraSession;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -22,7 +22,9 @@ import org.mockito.runners.MockitoJUnitRunner;
 
 import java.nio.ByteBuffer;
 import java.util.UUID;
+import java.util.function.Function;
 
+import static org.junit.Assert.*;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -33,7 +35,7 @@ import static org.mockito.Mockito.*;
 public class DefaultBinaryStoreManagerTest {
 
     @Mock
-    CassandraSession cassandraSession;
+    WhenCassandraSession session;
     @Mock
     BinaryStoreStatements binaryStoreStatements;
     @Mock
@@ -43,11 +45,7 @@ public class DefaultBinaryStoreManagerTest {
     @Mock
     MetricRegistry registry;
     @Mock
-    FutureCallback<Void> storeCallback;
-    @Mock
-    FutureCallback<FileInfo> loadFileCallback;
-    @Mock
-    FutureCallback<ChunkInfo> loadChunkCallback;
+    ResultSet resultSet;
 
     // Metrics Mocks
     @Mock
@@ -77,13 +75,18 @@ public class DefaultBinaryStoreManagerTest {
     Counter chunkWriterErrorCount;
 
     @Captor
-    ArgumentCaptor<FutureCallback<ResultSet>> execAsyncArgumentCaptor;
+    ArgumentCaptor<Function<ResultSet, Promise<ResultSet>>> fulfilledCaptor;
+    @Captor
+    ArgumentCaptor<Function<Throwable, Promise<ResultSet>>> rejectedCaptor;
 
-    UUID uuid = UUID.fromString("739a6466-adf8-11e3-aca6-425861b86ab6");
-    DefaultBinaryStoreManager bsm;
+    private UUID uuid = UUID.fromString("739a6466-adf8-11e3-aca6-425861b86ab6");
+    private DefaultBinaryStoreManager bsm;
+    private When when;
 
     @Before
     public void setUp() throws Exception {
+
+        when = WhenFactory.createSync();
 
         when(registry.timer("et.cass.binarystore.files.read.success")).thenReturn(fileReadTimer);
         when(registry.counter("et.cass.binarystore.files.read.errors")).thenReturn(fileReadErrorCount);
@@ -100,7 +103,9 @@ public class DefaultBinaryStoreManagerTest {
         when(chunkReadTimer.time()).thenReturn(chunkReadTimerContext);
         when(chunkWriteTimer.time()).thenReturn(chunkWriteTimerContext);
 
-        bsm = new DefaultBinaryStoreManager(cassandraSession, binaryStoreStatements, registry);
+        when(session.executeAsync(any(Statement.class))).thenReturn(when.resolve(resultSet));
+
+        bsm = new DefaultBinaryStoreManager(session, binaryStoreStatements, registry, when);
     }
 
     @Test
@@ -130,23 +135,21 @@ public class DefaultBinaryStoreManagerTest {
         when(preparedStatement.bind(uuid, 1000L, 100, 123456789L, "testfile.jpg", "image/jpeg", null)).thenReturn(boundStatement);
 
         // When we call storeFile
-        bsm.storeFile(fileInfo, storeCallback);
+        Promise<Void> p = bsm.storeFile(fileInfo);
 
         // Then we expect the write metric to be started, the binary store to be asked to write the file
         verify(fileWriteTimer).time();
 
         verify(binaryStoreStatements).getStoreFile();
         verify(preparedStatement).bind(uuid, 1000L, 100, 123456789L, "testfile.jpg", "image/jpeg", null);
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-
-        // When we call the success method on the cassandra callback
-        execAsyncArgumentCaptor.getValue().onSuccess(null);
+        verify(session).executeAsync(any(BoundStatement.class));
 
         // Then we expect the timer to be stopped and for our callback to have the success method called
         // We also ensure that the error count was *not* called
         verifyZeroInteractions(fileWriterErrorCount);
         verify(fileWriteTimerContext).stop();
-        verify(storeCallback).onSuccess(null);
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
+
     }
 
     @Test
@@ -157,79 +160,73 @@ public class DefaultBinaryStoreManagerTest {
         // Set up interactions
         when(binaryStoreStatements.getStoreFile()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid, 1000L, 100, 123456789L, "testfile.jpg", "image/jpeg", null)).thenReturn(boundStatement);
+        sessionReject();
 
         // When we call storeFile
-        bsm.storeFile(fileInfo, storeCallback);
+        Promise<Void> p = bsm.storeFile(fileInfo);
 
         // Capture the cassandra callback
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-
-        // And then call the onFailure method on the cassandra callback
-        Throwable t = new Throwable("This is an error");
-        execAsyncArgumentCaptor.getValue().onFailure(t);
+        verify(session).executeAsync(any(BoundStatement.class));
 
         // Then we expect the timer to be stopped and for our callback to have the success method called
         // We also ensure that the error count was incremented.
         verify(fileWriterErrorCount).inc();
         verify(fileWriteTimerContext).stop();
-        verify(storeCallback).onFailure(t);
+        assertEquals(HandlerState.REJECTED, p.inspect().getState());
+
     }
 
     @Test
     public void testStoringAChunk() throws Exception {
         // Create our chunk info
         ByteBuffer byteBuffer = ByteBuffer.wrap("This is some data".getBytes());
-        ChunkInfo chunkInfo = new DefaultChunkInfo().setId(uuid).setNum(1).setData(byteBuffer.array());
+        ChunkInfo chunkInfo = new ChunkInfo().setId(uuid).setNum(1).setData(byteBuffer.array());
 
         // Set up interactions
         when(binaryStoreStatements.getStoreChunk()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid, 1, byteBuffer)).thenReturn(boundStatement);
 
         // When we call storeChunk
-        bsm.storeChunk(chunkInfo, storeCallback);
+        Promise<Void> p = bsm.storeChunk(chunkInfo);
 
         // Capture the cassandra callback
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-
-        // And then call the onFailure method on the cassandra callback
-        Throwable t = new Throwable("This is an error");
-        execAsyncArgumentCaptor.getValue().onFailure(t);
+        verify(session).executeAsync(any(BoundStatement.class));
 
         // Then we expect the timer to be stopped and for our callback to have the success method called
-        // We also ensure that the error count was incremented.
-        verify(chunkWriterErrorCount).inc();
+        // We also ensure that the error count was *not* called
+        verifyZeroInteractions(chunkWriterErrorCount);
         verify(chunkWriteTimerContext).stop();
-        verify(storeCallback).onFailure(t);
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
+
     }
 
     @Test
     public void testStoringAChunkUnsuccessfully() throws Exception {
         // Create our chunk info
         ByteBuffer byteBuffer = ByteBuffer.wrap("This is some data".getBytes());
-        ChunkInfo chunkInfo = new DefaultChunkInfo().setId(uuid).setNum(1).setData(byteBuffer.array());
+        ChunkInfo chunkInfo = new ChunkInfo().setId(uuid).setNum(1).setData(byteBuffer.array());
 
         // Set up interactions
         when(binaryStoreStatements.getStoreChunk()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid, 1, byteBuffer)).thenReturn(boundStatement);
+        sessionReject();
 
         // When we call storeChunk
-        bsm.storeChunk(chunkInfo, storeCallback);
+        Promise<Void> p = bsm.storeChunk(chunkInfo);
 
         // Then we expect the write metric to be started, the binary store to be asked to write the file
         verify(chunkWriteTimer).time();
 
         verify(binaryStoreStatements).getStoreChunk();
         verify(preparedStatement).bind(uuid, 1, byteBuffer);
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-
-        // When we call the success method on the cassandra callback
-        execAsyncArgumentCaptor.getValue().onSuccess(null);
+        verify(session).executeAsync(any(BoundStatement.class));
 
         // Then we expect the timer to be stopped and for our callback to have the success method called
-        // We also ensure that the error count was *not* called
-        verifyZeroInteractions(chunkWriterErrorCount);
+        // We also ensure that the error count was incremented.
+        verify(chunkWriterErrorCount).inc();
         verify(chunkWriteTimerContext).stop();
-        verify(storeCallback).onSuccess(null);
+        assertEquals(HandlerState.REJECTED, p.inspect().getState());
+
     }
 
     @Test
@@ -241,7 +238,6 @@ public class DefaultBinaryStoreManagerTest {
         when(binaryStoreStatements.getLoadFile()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid)).thenReturn(boundStatement);
 
-        ResultSet resultSet = mock(ResultSet.class);
         Row row = mock(Row.class);
         when(resultSet.one()).thenReturn(row);
 
@@ -253,23 +249,22 @@ public class DefaultBinaryStoreManagerTest {
         when(row.getMap("metadata", String.class, String.class)).thenReturn(null);
 
         // When we call loadFile
-        bsm.loadFile(uuid, loadFileCallback);
+        Promise<FileInfo> p = bsm.loadFile(uuid);
 
         // Then we expect the read metric to be started and the binary store to be asked to load the file
         verify(fileReadTimer).time();
 
         verify(binaryStoreStatements).getLoadFile();
         verify(preparedStatement).bind(uuid);
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-
-        // When we call the onSuccess method on the callback with our mocked ResultSet
-        execAsyncArgumentCaptor.getValue().onSuccess(resultSet);
+        verify(session).executeAsync(any(BoundStatement.class));
 
         // Then we expect our row to be read, the timer to be stopped and our callback's success method to be called
         // with the correct FileInfo object.
         verifyZeroInteractions(fileReadErrorCount);
         verify(fileReadTimerContext).stop();
-        verify(loadFileCallback).onSuccess(eq(fileInfo));
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
+        assertNotNull(p.inspect().getValue());
+
     }
 
     @Test
@@ -277,21 +272,20 @@ public class DefaultBinaryStoreManagerTest {
         // Set up interactions
         when(binaryStoreStatements.getLoadFile()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid)).thenReturn(boundStatement);
+        sessionReject();
 
         // When we call loadFile
-        bsm.loadFile(uuid, loadFileCallback);
+        Promise<FileInfo> p = bsm.loadFile(uuid);
 
         // and when we call the onFailure method on the callback, after capturing it.
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-
-        Throwable t = new Throwable("This was an error.");
-        execAsyncArgumentCaptor.getValue().onFailure(t);
+        verify(session).executeAsync(any(BoundStatement.class));
 
         // Then we expect our error count to be incremented, the timer to be stopped and for our failure method on our callback
         // to be called.
         verify(fileReadErrorCount).inc();
         verify(fileReadTimerContext).stop();
-        verify(loadFileCallback).onFailure(t);
+        assertEquals(HandlerState.REJECTED, p.inspect().getState());
+
     }
 
     @Test
@@ -300,56 +294,50 @@ public class DefaultBinaryStoreManagerTest {
         when(binaryStoreStatements.getLoadFile()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid)).thenReturn(boundStatement);
 
-        ResultSet resultSet = mock(ResultSet.class);
         when(resultSet.one()).thenReturn(null);
 
         // When we call loadFile
-        bsm.loadFile(uuid, loadFileCallback);
-
-        // When we call the onSuccess method on the callback with an empty ResultSet
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-        execAsyncArgumentCaptor.getValue().onSuccess(resultSet);
+        Promise<FileInfo> p = bsm.loadFile(uuid);
 
         // Then we expect there to be no interactions with the error count, for the timer to be stopped and for our
         // callback to have its success method called with null
         verifyZeroInteractions(fileReadErrorCount);
         verify(fileReadTimerContext).stop();
-        verify(loadFileCallback).onSuccess(null);
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
+        assertNull(p.inspect().getValue());
+
     }
 
     @Test
     public void testLoadingAChunk() throws Exception {
         // Set the chunkinfo to compare at the end
-        ChunkInfo chunkInfo = new DefaultChunkInfo().setId(uuid).setNum(1).setData("This is some data".getBytes());
+        ChunkInfo chunkInfo = new ChunkInfo().setId(uuid).setNum(1).setData("This is some data".getBytes());
 
         // Set up interactions
         when(binaryStoreStatements.getLoadChunk()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid, 1)).thenReturn(boundStatement);
 
-        ResultSet resultSet = mock(ResultSet.class);
         Row row = mock(Row.class);
         when(resultSet.one()).thenReturn(row);
 
         when(row.getBytes("data")).thenReturn(ByteBuffer.wrap("This is some data".getBytes()));
 
         // When we call loadChunk
-        bsm.loadChunk(uuid, 1, loadChunkCallback);
+        Promise<ChunkInfo> p = bsm.loadChunk(uuid, 1);
 
         // Then we expect the read metricto be started and the binary store to be asked to load the chunk
         verify(chunkReadTimer).time();
 
         verify(binaryStoreStatements).getLoadChunk();
         verify(preparedStatement).bind(uuid, 1);
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-
-        // When we call the onSuccess method on the callback with our mocked ResultSet
-        execAsyncArgumentCaptor.getValue().onSuccess(resultSet);
+        verify(session).executeAsync(any(BoundStatement.class));
 
         // Then we expect our row to be read, the timer to be stopped and our callback's success method to be called
         // with the correct ChunkInfo object.
         verifyZeroInteractions(chunkReadErrorCount);
         verify(chunkReadTimerContext).stop();
-        verify(loadChunkCallback).onSuccess(eq(chunkInfo));
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
+
     }
 
     @Test
@@ -357,21 +345,20 @@ public class DefaultBinaryStoreManagerTest {
         // Set up interactions
         when(binaryStoreStatements.getLoadChunk()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid, 1)).thenReturn(boundStatement);
+        sessionReject();
 
         // When we call loadChunk
-        bsm.loadChunk(uuid, 1, loadChunkCallback);
+        Promise<ChunkInfo> p = bsm.loadChunk(uuid, 1);
 
         // and when we call the onFailure method on the callback, after capturing it.
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-
-        Throwable t = new Throwable("This was an error.");
-        execAsyncArgumentCaptor.getValue().onFailure(t);
+        verify(session).executeAsync(any(BoundStatement.class));
 
         // Then we expect the chunkErrorCount to be incremented, the timer to be stopped and our callback's onFailure
         // method to be called.
         verify(chunkReadErrorCount).inc();
         verify(chunkReadTimerContext).stop();
-        verify(loadChunkCallback).onFailure(t);
+        assertEquals(HandlerState.REJECTED, p.inspect().getState());
+
     }
 
     @Test
@@ -380,31 +367,36 @@ public class DefaultBinaryStoreManagerTest {
         when(binaryStoreStatements.getLoadChunk()).thenReturn(preparedStatement);
         when(preparedStatement.bind(uuid, 1)).thenReturn(boundStatement);
 
-        ResultSet resultSet = mock(ResultSet.class);
         when(resultSet.one()).thenReturn(null);
 
         // When we call loadChunk
-        bsm.loadChunk(uuid, 1, loadChunkCallback);
+        Promise<ChunkInfo> p = bsm.loadChunk(uuid, 1);
 
         // and When we call the onSuccess method on the callback with an empty ResultSet
-        verify(cassandraSession).executeAsync(any(BoundStatement.class), execAsyncArgumentCaptor.capture());
-        execAsyncArgumentCaptor.getValue().onSuccess(resultSet);
+        verify(session).executeAsync(any(BoundStatement.class));
 
 
         // Then we expect there to be no interactions with the error count, for the timer to be stopped and for
         // our callback to have its success method called with null
         verifyZeroInteractions(chunkReadErrorCount);
         verify(chunkReadTimerContext).stop();
-        verify(loadChunkCallback).onSuccess(null);
+        assertEquals(HandlerState.FULFILLED, p.inspect().getState());
+        assertNull(p.inspect().getValue());
+
     }
 
     private FileInfo createFileInfo() {
-        return new DefaultFileInfo()
+        return new FileInfo()
                 .setChunkSize(100)
                 .setContentType("image/jpeg")
                 .setFileName("testfile.jpg")
                 .setId(uuid)
                 .setLength(1000L)
                 .setUploadDate(123456789L);
+    }
+
+    private void sessionReject() {
+        Throwable t = new Throwable("This is an error");
+        when(session.executeAsync(any(Statement.class))).thenReturn(when.reject(t));
     }
 }

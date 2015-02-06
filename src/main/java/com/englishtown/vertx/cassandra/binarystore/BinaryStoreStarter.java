@@ -1,11 +1,8 @@
 package com.englishtown.vertx.cassandra.binarystore;
 
+import com.englishtown.promises.Promise;
 import com.englishtown.vertx.cassandra.CassandraSession;
-import com.google.common.util.concurrent.FutureCallback;
-import org.vertx.java.core.AsyncResult;
-import org.vertx.java.core.Handler;
-import org.vertx.java.core.impl.DefaultFutureResult;
-import org.vertx.java.platform.Container;
+import io.vertx.core.Vertx;
 
 import javax.inject.Inject;
 
@@ -16,31 +13,21 @@ public class BinaryStoreStarter implements AutoCloseable {
 
     private final CassandraSession session;
     private final BinaryStoreStatements statements;
-    private final Container container;
+    private final Vertx vertx;
 
     @Inject
-    public BinaryStoreStarter(CassandraSession session, BinaryStoreStatements statements, Container container) {
+    public BinaryStoreStarter(CassandraSession session, BinaryStoreStatements statements, Vertx vertx) {
         this.session = session;
         this.statements = statements;
-        this.container = container;
+        this.vertx = vertx;
     }
 
-    public void run(final Handler<AsyncResult<Void>> done) {
+    public Promise<Void> run() {
 
         // Get keyspace, default to binarystore
-        String keyspace = container.config().getString("keyspace", "binarystore");
+        String keyspace = vertx.getOrCreateContext().config().getString("keyspace", "binarystore");
 
-        statements.init(keyspace, new FutureCallback<Void>() {
-            @Override
-            public void onSuccess(Void result) {
-                done.handle(new DefaultFutureResult<>((Void) null));
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                done.handle(new DefaultFutureResult<Void>(t));
-            }
-        });
+        return statements.init(keyspace);
 
     }
 
