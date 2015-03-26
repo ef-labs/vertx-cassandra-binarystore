@@ -52,7 +52,7 @@ public class BinaryStoreIntegrationTest extends VertxTestBase {
 
             CassandraConfigurator configurator = new EnvironmentCassandraConfigurator(vertx, System::getenv);
             CassandraSession session = new DefaultCassandraSession(builder, configurator, vertx);
-            WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session, when);
+            WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session, when, vertx);
             BinaryStoreStatements statements = new DefaultBinaryStoreStatements(whenSession, when);
             BinaryStoreStarter starter = new BinaryStoreStarter(session, statements, vertx);
             BinaryStoreManager binaryStoreManager = new DefaultBinaryStoreManager(whenSession, statements, new MetricRegistry(), when);

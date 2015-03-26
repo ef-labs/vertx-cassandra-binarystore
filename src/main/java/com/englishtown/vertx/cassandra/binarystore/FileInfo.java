@@ -1,6 +1,6 @@
 package com.englishtown.vertx.cassandra.binarystore;
 
-import io.vertx.codegen.annotations.Options;
+import io.vertx.codegen.annotations.DataObject;
 import io.vertx.core.json.JsonObject;
 
 import java.util.LinkedHashMap;
@@ -11,7 +11,7 @@ import java.util.UUID;
 /**
  * Binary store file info
  */
-@Options
+@DataObject
 public class FileInfo {
 
     UUID id;
