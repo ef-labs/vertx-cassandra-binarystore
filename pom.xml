@@ -18,11 +18,11 @@
 
     <properties>
         <!--Dependency versions-->
-        <vertx.version>3.0.0-milestone3</vertx.version>
+        <vertx.version>3.0.0-milestone4</vertx.version>
         <mockito.version>1.10.19</mockito.version>
-        <vertx.cassandra.version>3.0.0-RC3</vertx.cassandra.version>
-        <vertx.hk2.version>2.0.0-RC2</vertx.hk2.version>
-        <vertx.when.version>4.0.0-RC2</vertx.when.version>
+        <vertx.cassandra.version>3.0.0-RC5</vertx.cassandra.version>
+        <vertx.hk2.version>2.0.0-RC3</vertx.hk2.version>
+        <vertx.when.version>4.0.0-RC3</vertx.when.version>
     </properties>
 
     <dependencies>
