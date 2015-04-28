@@ -7,8 +7,8 @@
     <packaging>jar</packaging>
     <version>2.0.0-SNAPSHOT</version>
 
-    <name>vertx-mod-cassandra-binarystore</name>
-    <url>https://github.com/englishtown/vertx-mod-cassandra-binarystore</url>
+    <name>vertx-cassandra-binarystore</name>
+    <url>https://github.com/englishtown/vertx-cassandra-binarystore</url>
 
     <parent>
         <groupId>com.englishtown.vertx</groupId>
