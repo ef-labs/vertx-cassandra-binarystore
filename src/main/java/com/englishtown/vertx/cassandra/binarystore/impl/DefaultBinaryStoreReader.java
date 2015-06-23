@@ -3,7 +3,7 @@ package com.englishtown.vertx.cassandra.binarystore.impl;
 import com.englishtown.vertx.cassandra.binarystore.*;
 import com.google.common.primitives.Ints;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.logging.impl.LoggerFactory;
+import io.vertx.core.logging.LoggerFactory;
 
 import javax.inject.Inject;
 import java.util.Arrays;
