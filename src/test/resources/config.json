@@ -2,6 +2,7 @@
     "keyspace": "test_binarystore",
 
     "cassandra" : {
+        "seeds": [${cassandra.seeds}],
         "consistency_level": "local_quorum",
         "auth": {
             "username": "binarystore_user",
