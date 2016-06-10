@@ -8,7 +8,10 @@ import com.englishtown.promises.WhenFactory;
 import com.englishtown.vertx.cassandra.CassandraConfigurator;
 import com.englishtown.vertx.cassandra.CassandraSession;
 import com.englishtown.vertx.cassandra.binarystore.*;
-import com.englishtown.vertx.cassandra.binarystore.impl.*;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreManager;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreReader;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreStatements;
+import com.englishtown.vertx.cassandra.binarystore.impl.DefaultBinaryStoreWriter;
 import com.englishtown.vertx.cassandra.impl.DefaultCassandraSession;
 import com.englishtown.vertx.cassandra.impl.EnvironmentCassandraConfigurator;
 import com.englishtown.vertx.cassandra.promises.WhenCassandraSession;
@@ -18,11 +21,14 @@ import io.vertx.core.file.AsyncFile;
 import io.vertx.core.file.OpenOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.test.core.VertxTestBase;
+import org.apache.cassandra.service.EmbeddedCassandraService;
+import org.junit.After;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.net.URL;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 
 
 /**
@@ -30,17 +36,33 @@ import java.util.concurrent.CountDownLatch;
  */
 public class BinaryStoreIntegrationTest extends VertxTestBase {
 
+    private CassandraSession session;
     private BinaryStoreWriter binaryStoreWriter;
     private BinaryStoreReader binaryStoreReader;
 
     private final String FILE_NAME = "EF_Labs_ENG_logo.JPG";
     private final int FILE_LENGTH = 161966;
 
+    private static EmbeddedCassandraService cassandraService = null;
+
+    @BeforeClass
+    public static void beforeClass() throws Exception {
+        if (cassandraService == null) {
+            String embedded = System.getProperty("test.embedded", "");
+            if (!"true".equals(embedded)) {
+                return;
+            }
+            System.setProperty("cassandra.storagedir", "target/cassandra");
+            cassandraService = new EmbeddedCassandraService();
+            cassandraService.start();
+        }
+    }
+
     @Override
     public void setUp() throws Exception {
         super.setUp();
 
-        CountDownLatch latch = new CountDownLatch(1);
+        CompletableFuture<Void> future = new CompletableFuture<>();
 
         vertx.runOnContext(aVoid -> {
 
@@ -51,7 +73,7 @@ public class BinaryStoreIntegrationTest extends VertxTestBase {
             When when = WhenFactory.createSync();
 
             CassandraConfigurator configurator = new EnvironmentCassandraConfigurator(vertx, System::getenv);
-            CassandraSession session = new DefaultCassandraSession(builder, configurator, vertx);
+            session = new DefaultCassandraSession(builder, configurator, vertx);
             WhenCassandraSession whenSession = new DefaultWhenCassandraSession(session, when, vertx);
             BinaryStoreStatements statements = new DefaultBinaryStoreStatements(whenSession, when);
             BinaryStoreStarter starter = new BinaryStoreStarter(session, statements, vertx);
@@ -60,18 +82,33 @@ public class BinaryStoreIntegrationTest extends VertxTestBase {
             binaryStoreWriter = new DefaultBinaryStoreWriter(binaryStoreManager, when);
             binaryStoreReader = new DefaultBinaryStoreReader(binaryStoreManager);
 
-            starter.run()
-                    .otherwise(t -> {
-                        t.printStackTrace();
-                        fail();
-                        return null;
-                    })
-                    .ensure(latch::countDown);
+            session.onReady(result -> {
+                if (result.failed()) {
+                    future.completeExceptionally(result.cause());
+                    return;
+                }
+                starter.run().then(
+                        aVoid2 -> {
+                            future.complete(aVoid2);
+                            return null;
+                        },
+                        t -> {
+                            future.completeExceptionally(t);
+                            return null;
+                        });
+            });
 
         });
 
-        latch.await();
+        future.get();
 
+    }
+
+    @After
+    public void teardown() throws Exception {
+        if (session != null) {
+            session.close();
+        }
     }
 
     @Test
