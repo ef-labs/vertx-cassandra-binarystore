@@ -4,7 +4,8 @@ Allows storing large binary files in Cassandra via the Vert.x event bus keeping 
 1. files - contains file information such as filename, contentType, length, chunkSize, and additional metadata
 2. chunks - contains the chunks of binary data
 
-[![Build Status](https://travis-ci.org/englishtown/vertx-cassandra-binarystore.png)](https://travis-ci.org/englishtown/vertx-cassandra-binarystore)
+[![Build Status](http://img.shields.io/travis/ef-labs/vertx-cassandra-binarystore.svg?maxAge=2592000&style=flat-square)](https://travis-ci.org/ef-labs/vertx-cassandra-binarystore)
+[![Maven Central](https://img.shields.io/maven-central/v/com.englishtown.vertx/vertx-cassandra-binarystore.svg?maxAge=2592000&style=flat-square)](https://maven-badges.herokuapp.com/maven-central/com.englishtown.vertx/vertx-cassandra-binarystore/)
 
 ## Dependencies
 
