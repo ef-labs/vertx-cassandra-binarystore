@@ -5,7 +5,7 @@
     <groupId>com.englishtown.vertx</groupId>
     <artifactId>vertx-cassandra-binarystore</artifactId>
     <packaging>jar</packaging>
-    <version>2.2.0</version>
+    <version>2.2.1</version>
 
     <name>vertx-cassandra-binarystore</name>
     <url>https://github.com/englishtown/vertx-cassandra-binarystore</url>
@@ -23,6 +23,7 @@
         <vertx.hk2.version>2.4.0</vertx.hk2.version>
         <vertx.when.version>4.2.0</vertx.when.version>
         <guava.version>18.0</guava.version>
+        <system-rules.version>1.19.0</system-rules.version>
 
         <!--Test properties-->
         <test.cassandra.seeds>"localhost"</test.cassandra.seeds>
@@ -86,6 +87,12 @@
             <groupId>org.apache.cassandra</groupId>
             <artifactId>cassandra-all</artifactId>
             <version>${cassandra.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.stefanbirkner</groupId>
+            <artifactId>system-rules</artifactId>
+            <version>${system-rules.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
