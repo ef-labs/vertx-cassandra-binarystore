@@ -18,7 +18,6 @@ The Cassandra Binary Store module takes the following configuration:
 
     {
         "address": <address>,
-        "ips": [<ips>],
         "keyspace": <keyspace>
     }
 
@@ -26,15 +25,13 @@ For example:
 
     {
         "address": "test.my_persistor",
-        "ips": ["192.168.1.100"],
         "keyspace": "my_keyspace"
     }
 
 Let's take a look at each field in turn:
 
 * `address` The main address for the module. Every module has a main address. Defaults to `et.cassandra.binarystore`.
-* `ips` An array of ip addresses for the Cassandra cluster. Defaults to `127.0.0.1`.
-* `keyspace` The keyspace name in Cassandra instance to use. Defaults to `binarystore`.
+* `keyspace` The keyspace name in Cassandra instance to use. Defaults to `binarystore`.  This can also be set via env var BINARYSTORE_KEYSPACE
 
 
 ## Operations
