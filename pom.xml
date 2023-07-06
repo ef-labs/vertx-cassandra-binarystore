@@ -19,7 +19,7 @@
     <properties>
         <!--Dependency versions-->
         <vertx.cassandra.version>3.4.0</vertx.cassandra.version>
-        <cassandra.version>3.7</cassandra.version>
+        <cassandra.version>4.0.10</cassandra.version>
         <vertx.hk2.version>2.4.0</vertx.hk2.version>
         <vertx.when.version>4.2.0</vertx.when.version>
         <guava.version>18.0</guava.version>
